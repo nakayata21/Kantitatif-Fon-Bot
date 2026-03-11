@@ -28,11 +28,24 @@ def format_telegram_message(market, df_res):
     msg += f"🗓 Tarih: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} (UTC)\n\n"
     for idx, row in top_buys.iterrows():
         ai_tahmin = row.get('AI Tahmin', '-')
+        ozel_durum = row.get('Özel Durum', '-')
+        squeeze = row.get('Daralma (Squeeze)', '-')
+        bollinger = row.get('Bollinger', '-')
+        
         msg += f"📌 *{row['Hisse']}*\n"
-        msg += f"   ➤ Kalite: *{row['Kalite']}*\n"
+        msg += f"   ➤ Kalite: *{row['Kalite']}* | AI: *{ai_tahmin}*\n"
         msg += f"   ➤ Aksiyon: {row['Aksiyon']}\n"
-        msg += f"   ➤ R/R Oranı: {row['R/R']}\n"
-        msg += f"   ➤ AI Tahmin: {ai_tahmin}\n\n"
+        
+        # Ekstra Teknik Detaylar
+        teknik = []
+        if ozel_durum != "-": teknik.append(ozel_durum)
+        if squeeze != "-": teknik.append(squeeze)
+        if bollinger != "-": teknik.append(bollinger)
+        
+        if teknik:
+            msg += f"   ➤ Sinyal: {' | '.join(teknik)}\n"
+        
+        msg += f"   ➤ R/R Oranı: {row['R/R']}\n\n"
     return msg
 
 if __name__ == "__main__":
