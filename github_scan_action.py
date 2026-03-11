@@ -12,23 +12,28 @@ TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "8336526803:AAFDV687CJzXz7J692hagcx
 CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "8336526803")
 MARKET = os.environ.get("TARGET_MARKET", "BIST") # Varsayılan BIST
 
-def is_market_open():
-    """BIST çalışma saatlerini kontrol eder (Hafta içi 10:00 - 18:15)"""
+def get_market_status():
+    """Piyasa durumunu kontrol eder: OPEN, PRE_MARKET, CLOSED"""
     now_tr = datetime.now(TR_TZ)
     day = now_tr.weekday()  # 0=Monday, 6=Sunday
     hour = now_tr.hour
     minute = now_tr.minute
     
-    # Cumartesi(5) ve Pazar(6) kapalı
+    # Hafta sonu kapalı
     if day >= 5:
-        return False
+        return "CLOSED"
     
-    # 10:00'dan önce veya 18:15'ten sonra kapalı
     current_time_float = hour + minute / 60.0
-    if current_time_float < 10.0 or current_time_float > 18.25:
-        return False
+    
+    # 10:00 - 18:15 arası Piyasa AÇIK
+    if 10.0 <= current_time_float <= 18.25:
+        return "OPEN"
+    
+    # 09:15 - 10:00 arası AÇILIŞ ÖNCESİ BİLGİLENDİRME
+    if 9.25 <= current_time_float < 10.0:
+        return "PRE_MARKET"
         
-    return True
+    return "CLOSED"
 
 def send_msg(text):
     if not TOKEN or not CHAT_ID:
@@ -38,16 +43,19 @@ def send_msg(text):
     payload = {"chat_id": CHAT_ID, "text": text, "parse_mode": "Markdown"}
     requests.post(url, data=payload, timeout=5)
 
-def format_telegram_message(market, df_res):
+def format_telegram_message(market, df_res, status):
     if df_res.empty: return f"❌ {market} piyasasında AL sinyali bulunamadı."
     buy_signals = df_res[df_res["Sinyal"] == "AL"]
     if buy_signals.empty: return f"❌ {market} piyasasında AL sinyali bulunamadı."
     
-    # En iyi 5 (veya bulabildiği kadar)
+    # En iyi 5
     top_buys = buy_signals.sort_values(by="Kalite", ascending=False).head(5)
+    
+    status_text = "🟢 Piyasa Açık (Canlı)" if status == "OPEN" else "🕒 Piyasa Açılmak Üzere (Ön Hazırlık)"
+    
     msg = f"🚀 *{market} OTOMATİK TARAMA RAPORU*\n"
     msg += f"🗓 Tarih: {datetime.now(TR_TZ).strftime('%Y-%m-%d %H:%M:%S')}\n"
-    msg += f"⏱ Durum: Piyasa Açık (Canlı Veri)\n\n"
+    msg += f"⏱ Durum: {status_text}\n\n"
     
     for idx, row in top_buys.iterrows():
         ai_tahmin = row.get('AI Tahmin', '-')
@@ -59,7 +67,6 @@ def format_telegram_message(market, df_res):
         msg += f"   ➤ Kalite: *{row['Kalite']}* | AI: *{ai_tahmin}*\n"
         msg += f"   ➤ Aksiyon: {row['Aksiyon']}\n"
         
-        # Ekstra Teknik Detaylar
         teknik = []
         if ozel_durum != "-": teknik.append(ozel_durum)
         if squeeze != "-": teknik.append(squeeze)
@@ -72,16 +79,17 @@ def format_telegram_message(market, df_res):
     return msg
 
 if __name__ == "__main__":
-    if not is_market_open():
-        print(f"[{datetime.now(TR_TZ)}] Piyasa kapalı olduğu için tarama atlanıyor.")
-        # Sadece sessizce log basıyoruz, Telegram'a mesaj atmıyoruz.
+    status = get_market_status()
+    
+    if status == "CLOSED":
+        print(f"[{datetime.now(TR_TZ)}] Piyasa kapalı (veya açılış öncesi saatinde değil), tarama atlanıyor.")
     else:
-        print(f"[{datetime.now(TR_TZ)}] Piyasa AÇIK. {MARKET} taraması başlatılıyor...")
+        print(f"[{datetime.now(TR_TZ)}] Durum: {status}. {MARKET} taraması başlatılıyor...")
         symbols = DEFAULT_BIST_HISSELER if MARKET == "BIST" else DEFAULT_NASDAQ_HISSELER
         
         try:
             df, errs = run_scan(symbols, MARKET, "Gunluk", delay_ms=500, workers=5, gui=False)
-            message = format_telegram_message(MARKET, df)
+            message = format_telegram_message(MARKET, df, status)
             send_msg(message)
             print(f"[{datetime.now(TR_TZ)}] İşlem Başarıyla Tamamlandı. Mesaj Gönderildi!")
         except Exception as e:
