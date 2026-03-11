@@ -1,0 +1,65 @@
+name: Daily Quant Screener 🚀
+
+on:
+  schedule:
+    # BIST Kapanış (Türkiye Saati ile 17:30 -> UTC ~14:30)
+    # Nasdaq Ön Açılış (Türkiye Saati ile 18:00 -> UTC ~15:00)
+    - cron: '30 14 * * 1-5' # Pazartesi(1)'den Cuma(5)'ya BIST Action (UTC Saati ile!)
+    - cron: '0 15 * * 1-5'  # Pazartesi(1)'den Cuma(5)'ya NASDAQ Action (UTC Saati ile!)
+  workflow_dispatch: # Manuel olarak GitHub sitesinden tetiklemek istersen
+
+jobs:
+  run-screener-bist:
+    name: 📉 BIST Taraması
+    runs-on: ubuntu-latest
+    if: github.event.schedule == '30 14 * * 1-5' || github.event_name == 'workflow_dispatch'
+
+    steps:
+      - name: 📦 Kodu Çek
+        uses: actions/checkout@v3
+
+      - name: 🐍 Python 3.9 Kurulumu
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.9'
+          cache: 'pip'
+
+      - name: 📚 Bağımlılıkları Yükle
+        run: |
+          python -m pip install --upgrade pip
+          pip install pandas numpy requests numba streamlit ta scikit-learn tvDatafeed xgboost isyatirimhisse vectorbt plotly --no-cache-dir
+
+      - name: 🚀 BIST Makine Öğrenmesi & Taramayı Başlat
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          TARGET_MARKET: "BIST"
+        run: python github_scan_action.py
+
+
+  run-screener-nasdaq:
+    name: 📈 NASDAQ Taraması
+    runs-on: ubuntu-latest
+    if: github.event.schedule == '0 15 * * 1-5' || github.event_name == 'workflow_dispatch'
+
+    steps:
+      - name: 📦 Kodu Çek
+        uses: actions/checkout@v3
+
+      - name: 🐍 Python 3.9 Kurulumu
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.9'
+          cache: 'pip'
+
+      - name: 📚 Bağımlılıkları Yükle
+        run: |
+          python -m pip install --upgrade pip
+          pip install pandas numpy requests numba streamlit ta scikit-learn tvDatafeed xgboost isyatirimhisse vectorbt plotly --no-cache-dir
+
+      - name: 🚀 NASDAQ Makine Öğrenmesi & Taramayı Başlat
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          TARGET_MARKET: "NASDAQ"
+        run: python github_scan_action.py

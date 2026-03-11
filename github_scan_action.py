@@ -1,0 +1,50 @@
+import os
+from streamlit_app import run_scan, DEFAULT_BIST_HISSELER, DEFAULT_NASDAQ_HISSELER
+import requests
+from datetime import datetime
+
+# GitHub Secrets'ten okuyacağız, eğer yoksa sistem çöksün ki hatayı anlayalım.
+TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
+CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
+MARKET = os.environ.get("TARGET_MARKET", "BIST") # Varsayılan BIST
+
+def send_msg(text):
+    if not TOKEN or not CHAT_ID:
+        print("Telegram Ayarları Bulunamadı (Secrets Eksik)!")
+        return
+    url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
+    payload = {"chat_id": CHAT_ID, "text": text, "parse_mode": "Markdown"}
+    requests.post(url, data=payload, timeout=5)
+
+def format_telegram_message(market, df_res):
+    if df_res.empty: return f"❌ {market} piyasasında AL sinyali bulunamadı."
+    buy_signals = df_res[df_res["Sinyal"] == "AL"]
+    if buy_signals.empty: return f"❌ {market} piyasasında AL sinyali bulunamadı."
+    
+    # En iyi 5 (veya bulabildiği kadar)
+    top_buys = buy_signals.sort_values(by="Kalite", ascending=False).head(5)
+    msg = f"🚀 *{market} GÜN SONU OTOMATİK TARAMA*\n"
+    msg += f"🗓 Tarih: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} (UTC)\n\n"
+    for idx, row in top_buys.iterrows():
+        ai_tahmin = row.get('AI Tahmin', '-')
+        msg += f"📌 *{row['Hisse']}*\n"
+        msg += f"   ➤ Kalite: *{row['Kalite']}*\n"
+        msg += f"   ➤ Aksiyon: {row['Aksiyon']}\n"
+        msg += f"   ➤ R/R Oranı: {row['R/R']}\n"
+        msg += f"   ➤ AI Tahmin: {ai_tahmin}\n\n"
+    return msg
+
+if __name__ == "__main__":
+    print(f"[{datetime.now()}] GitHub Actions üzerinden {MARKET} taraması başlatılıyor...")
+    symbols = DEFAULT_BIST_HISSELER if MARKET == "BIST" else DEFAULT_NASDAQ_HISSELER
+    
+    # Render UI olmadığından gui=False
+    try:
+        df, errs = run_scan(symbols, MARKET, "Gunluk", delay_ms=500, workers=5, gui=False)
+        message = format_telegram_message(MARKET, df)
+        send_msg(message)
+        print(f"[{datetime.now()}] İşlem Başarıyla Tamamlandı. Mesaj Gönderildi!")
+    except Exception as e:
+        error_msg = f"🔴 GİTHUB ACTION TARAMA HATASI ({MARKET}): {str(e)}"
+        print(error_msg)
+        send_msg(error_msg)
