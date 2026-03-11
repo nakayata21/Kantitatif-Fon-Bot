@@ -4,8 +4,9 @@ import requests
 from datetime import datetime
 
 # GitHub Secrets'ten okuyacağız, eğer yoksa sistem çöksün ki hatayı anlayalım.
-TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
-CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
+# GitHub Secrets'ten okuyacağız, veya varsayılanları kullanacağız.
+TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "8336526803:AAFDV687CJzXz7J692hagcx4CiCKFoZm8f8")
+CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "8336526803")
 MARKET = os.environ.get("TARGET_MARKET", "BIST") # Varsayılan BIST
 
 def send_msg(text):

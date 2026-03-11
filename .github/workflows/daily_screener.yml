@@ -1,0 +1,30 @@
+name: 15 Dakikalık Otomatik Tarama
+
+on:
+  schedule:
+    # Her 15 dakikada bir çalıştır (UTC)
+    - cron: '*/15 * * * *'
+  workflow_dispatch: # Manuel tetikleme için
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Kodları Çek
+        uses: actions/checkout@v3
+
+      - name: Python Kur
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.9'
+
+      - name: Kütüphaneleri Yükle
+        run: |
+          python -m pip install --upgrade pip
+          pip install pandas requests yfinance ta scikit-learn tvdatafeed
+          
+      - name: Taramayı Başlat
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: python github_scan_action.py
