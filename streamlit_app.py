@@ -1039,22 +1039,22 @@ def fetch_hist(tv, symbol: str, exchange: str, interval, bars: int, retries: int
 
 
 @st.cache_resource(ttl=3600*24, show_spinner="🤖 Yapay Zeka Modeli Eğitiliyor... (İlk Taramaya Özel Bekleyiniz)")
-def get_ai_model(market: str, tf_name: str, tv=None) -> tuple:
+def get_ai_model(market: str, tf_name: str, _tv=None) -> tuple:
     try:
         from sklearn.ensemble import RandomForestClassifier
     except ImportError:
         return None, None
         
-    if tv is None:
+    if _tv is None:
         from tvDatafeed import TvDatafeed
-        tv = TvDatafeed()
+        _tv = TvDatafeed()
     tf = TIMEFRAME_OPTIONS[tf_name]
     
     # Hedef endeks
     sym = "QQQ" if market == "NASDAQ" else "XU100"
     
     try:
-        df = fetch_hist(tv, sym, market, interval_obj(tf["base"]), 2500, retries=3)
+        df = fetch_hist(_tv, sym, market, interval_obj(tf["base"]), 2500, retries=3)
     except Exception:
         return None, None
         
@@ -1112,7 +1112,7 @@ def run_scan(
     # === YAPAY ZEKA MODELİNİ YÜKLE / EĞİT ===
     from tvDatafeed import TvDatafeed
     tv_shared = TvDatafeed()
-    ai_model, ai_features = get_ai_model(exchange, tf_name, tv=tv_shared)
+    ai_model, ai_features = get_ai_model(exchange, tf_name, _tv=tv_shared)
 
     # FIX: Per-worker delay ekle
     def scan_one(sym: str, tv_instance, worker_id: int = 0) -> Optional[Dict[str, object]]:
