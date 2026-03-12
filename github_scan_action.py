@@ -132,14 +132,21 @@ def get_ai_commentary(market, df_res):
         stock_data += f"  AI Tahmin: {row.get('AI Tahmin', '-')}\n"
         stock_data += f"  Özel Durum: {row.get('Özel Durum', '-')}\n\n"
     
-    prompt = f"""Sen profesyonel bir kantitatif borsa analistisin. Aşağıda {market} piyasasından bir algoritmik tarama sonucu var. 
-Bu verileri analiz edip kısa ve öz bir yatırım yorumu yap. Her hisse için 1 satır yaz. 
-Emoji kullan. Türkçe yaz. Toplam maksimum 500 karakter.
+    prompt = f"""Aşağıda {market} piyasasından algoritmik tarama ile bulunan en iyi 5 hissenin teknik analiz verileri var.
 
 Tarama Verileri:
 {stock_data}
 
-Önemli: Sadece yorum yaz, başlık veya açıklama ekleme. Her hisse için tek satır ve kısa ol."""
+Görevin:
+1. Her hisse için ayrı ayrı 2-3 cümlelik sade Türkçe yorum yaz.
+2. Teknik analiz terimlerini kullan ama bir borsa yeni başlayanı bile anlayabilsin.
+3. RSI, Hacim, MACD gibi verileri yorumla: "Bu ne anlama geliyor?" sorusuna cevap ver.
+4. Hissenin risk seviyesini belirt (düşük/orta/yüksek).
+5. "Alınır mı alınmaz mı?" sorusuna net bir görüş bildir.
+6. Her hissenin başına uygun emoji koy (📈 yükseliş, ⚠️ dikkat, 🔥 güçlü sinyal gibi).
+7. En sona 1-2 cümlelik genel bir piyasa değerlendirmesi ekle.
+
+Önemli: Yatırım tavsiyesi olmadığını belirtme. Doğrudan analiz yap. Sade ve anlaşılır Türkçe kullan."""
     
     try:
         from openai import OpenAI
@@ -152,19 +159,19 @@ Tarama Verileri:
         response = client.chat.completions.create(
             model="nvidia/nemotron-3-super-120b-a12b:free",
             messages=[
-                {"role": "system", "content": "Sen kısa ve öz yorum yapan bir borsa analistisin. Türkçe yaz."},
+                {"role": "system", "content": "Sen deneyimli bir Türk borsa analisti ve yatırım danışmanısın. Teknik analizi sade bir dille, herkesin anlayacağı şekilde açıklıyorsun. Yorum yaparken detaylı ve açıklayıcı ol. Emoji kullan. Türkçe yaz."},
                 {"role": "user", "content": prompt}
             ],
-            max_tokens=600,
+            max_tokens=1500,
             temperature=0.7,
         )
         
         ai_text = response.choices[0].message.content.strip()
-        print(f"\u2705 AI Yorumu alındı ({len(ai_text)} karakter)")
+        print(f"✅ AI Yorumu alındı ({len(ai_text)} karakter)")
         return ai_text
         
     except Exception as e:
-        print(f"\u274c AI Yorum Hatası: {str(e)}")
+        print(f"❌ AI Yorum Hatası: {str(e)}")
         return None
 
 
