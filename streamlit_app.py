@@ -10,7 +10,377 @@ import pandas as pd
 import streamlit as st
 import yfinance as yf
 
-st.set_page_config(page_title="Gelişmiş Hisse Tarayıcı", layout="wide", initial_sidebar_state="expanded")
+USER_AGENTS = [
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.3.1 Safari/605.1.15",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:123.0) Gecko/20100101 Firefox/123.0",
+    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+]
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def fetch_yf_data(ticker_symbol: str, market: str = "NASDAQ") -> dict:
+    import requests
+    isy_financials = None
+    if ticker_symbol.endswith(".IS"):
+        try:
+            import isyatirimhisse as isy
+            isy_sym = ticker_symbol.replace(".IS", "")
+            isy_financials = isy.fetch_financials(symbols=isy_sym, exchange="TRY")
+        except:
+            pass
+    
+    last_err = None
+    for attempt in range(3):
+        try:
+            session = requests.Session()
+            session.headers.update({
+                "User-Agent": random.choice(USER_AGENTS),
+                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.5",
+                "Accept-Language": "en-US,en;q=0.5",
+                "Connection": "keep-alive"
+            })
+            time.sleep(random.uniform(1.0, 3.0))
+            tk = yf.Ticker(ticker_symbol, session=session)
+            y_fin = tk.financials
+            if isy_financials is not None and not isy_financials.empty:
+                y_fin = isy_financials
+            return {
+                "info": tk.info,
+                "financials": y_fin,
+                "balance": tk.balance_sheet,
+                "cashflow": tk.cashflow,
+                "error": None
+            }
+        except Exception as e:
+            last_err = str(e)
+            wait = (2 ** attempt) + random.uniform(0.5, 1.5)
+            if attempt < 2:
+                time.sleep(wait)
+            continue
+    return {"error": last_err, "info": {}, "financials": None, "balance": None, "cashflow": None}
+
+# st.set_page_config sadece ana uygulama olarak çalışırken çağrılmalı.
+def init_gui():
+    st.set_page_config(page_title="Gelişmiş Hisse Tarayıcı", layout="wide", initial_sidebar_state="expanded")
+    inject_custom_css()
+    st.markdown('<p class="main-title">⚡ Gelişmiş Algoritmik Tarayıcı</p>', unsafe_allow_html=True)
+    st.caption("Veri Odaklı Kantitatif Yatırım Terminali (VCP, Smart Money & Bollinger Squeeze)")
+
+    if "piyasa" not in st.session_state:
+        st.session_state.piyasa = "NASDAQ"
+
+    piyasa = st.sidebar.radio("🌐 Piyasa Seçimi", ["NASDAQ", "BIST"], index=0 if st.session_state.piyasa == "NASDAQ" else 1)
+
+    st.sidebar.markdown("---")
+    st.sidebar.subheader("📲 Telegram Bildirimleri")
+    st.sidebar.caption("Taramalar bittiğinde sonuçları cebinize gönderin.")
+    telegram_token = st.sidebar.text_input("Telegram Bot Token", type="password", key="tg_token_input", value="", help="@BotFather üzerinden alabilirsiniz.")
+    telegram_chat_id = st.sidebar.text_input("Telegram Chat ID", key="tg_chat_id_input", value="1070470722", help="@userinfobot üzerinden alabilirsiniz.")
+
+    if piyasa != st.session_state.piyasa:
+        st.session_state.piyasa = piyasa
+        if piyasa == "NASDAQ":
+            st.session_state.symbols_text = ", ".join(DEFAULT_NASDAQ_HISSELER)
+        else:
+            st.session_state.symbols_text = ", ".join(DEFAULT_BIST_HISSELER)
+        st.session_state.scan_df = pd.DataFrame()
+        st.session_state.scan_errs = []
+        st.rerun()
+
+    if "symbols_text" not in st.session_state:
+        st.session_state.symbols_text = ", ".join(DEFAULT_NASDAQ_HISSELER) if st.session_state.piyasa == "NASDAQ" else ", ".join(DEFAULT_BIST_HISSELER)
+    if "scan_df" not in st.session_state:
+        st.session_state.scan_df = pd.DataFrame()
+    if "scan_errs" not in st.session_state:
+        st.session_state.scan_errs = []
+
+    main_tab1, main_tab2 = st.tabs(["🚀 Sistem Taraması (Screener)", "⏪ Geriye Dönük Test (Backtest)"])
+
+    with main_tab1:
+        st.subheader(f"{st.session_state.piyasa} Taraması")
+        symbols_input = st.text_area(f"{st.session_state.piyasa} Semboller (virgulle ayir)", key="symbols_text", height=120)
+        symbols = uniq([x.strip().upper() for x in symbols_input.split(",") if x.strip()])
+
+        c1, c2, c3, c4 = st.columns(4)
+        with c1:
+            tf_name = st.selectbox("Zaman Dilimi", list(TIMEFRAME_OPTIONS.keys()), index=0) # 4 Saatlik varsayılan
+        with c2:
+            delay_ms = st.slider("Sembol Gecikme (ms)", 300, 2000, 500, 50)
+        with c3:
+            workers = st.selectbox(
+                "⚡ Paralel Baglanti",
+                options=[1, 2, 3, 4, 5],
+                index=2,  # Varsayilan olarak guvenli "3" secili gelsin
+                help="1 = siradizimli (guvenli), 3-5 = paralel (hizli ama veri kopma riski var)",
+            )
+        with c4:
+            only_buy = st.checkbox("Sadece AL", value=False)
+
+        # Tahmini sure goster (Her hissenin ag baglanti maliyeti artik ~0.3s)
+        est_sec = len(symbols) * (delay_ms / 1000 + 0.6) / max(workers, 1)
+        if workers > 1:
+            est_sec += 3 # Threading havuzu baslatma suresini ekle
+
+        st.caption(
+            f"📊 {len(symbols)} hisse | "
+            f"⏱ Tahmini sure: ~{int(est_sec // 60)}d {int(est_sec % 60)}s "
+            f"({workers} baglanti ile)"
+        )
+
+        if st.button("Taramayi Baslat", type="primary"):
+            df_res, err_res = run_scan(symbols, st.session_state.piyasa, tf_name, delay_ms, workers=workers)
+            st.session_state.scan_df = df_res
+            st.session_state.scan_errs = err_res
+            st.session_state.scan_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+            # --- TELEGRAM BİLDİRİMİ GÖNDER ---
+            if st.session_state.get("tg_token_input") and st.session_state.get("tg_chat_id_input") and not df_res.empty:
+                buy_signals = df_res[df_res["Sinyal"] == "AL"]
+                if not buy_signals.empty:
+                    # Kaliteye göre sırala ve en iyi 5'ini al
+                    top_buys = buy_signals.sort_values(by="Kalite", ascending=False).head(5)
+                    msg = f"🚀 *YENİ TARAMA SONUÇLARI ({st.session_state.piyasa} - {tf_name})*\n\n"
+                    for idx, row in top_buys.iterrows():
+                        ai_tahmin = row.get('AI Tahmin', '-')
+                        msg += f"📌 *{row['Hisse']}*\n"
+                        msg += f"   ➤ Kalite: *{row['Kalite']}*\n"
+                        msg += f"   ➤ Aksiyon: {row['Aksiyon']}\n"
+                        msg += f"   ➤ R/R Oranı: {row['R/R']}\n"
+                        msg += f"   ➤ AI Tahmin: {ai_tahmin}\n\n"
+                    
+                    success = send_telegram_message(telegram_token, telegram_chat_id, msg)
+                    if success:
+                        st.toast("✅ Sonuçlar Telegram'a başarıyla gönderildi!")
+                    else:
+                        st.toast("❌ Telegram'a gönderilirken hata oluştu (Token veya Chat ID hatalı).", icon="🚨")
+
+        df = st.session_state.scan_df.copy()
+        errs = st.session_state.scan_errs
+
+        # Son tarama zamanini goster (varsa)
+        if "scan_time" in st.session_state:
+            st.caption(f"🕐 Son tarama: {st.session_state.scan_time}")
+
+        if df.empty:
+            st.info("Tarama baslatildiginda sonuclar burada gorunecek.")
+        else:
+            if only_buy:
+                df = df[df["Sinyal"] == "AL"].copy()
+            if df.empty:
+                st.warning("Filtrede sonuc yok. Filtreyi gevsetin.")
+            else:
+                top = df.iloc[0]
+                st.success(
+                    f" **Sistem Tavsiyesi (Top 1):** {top['Hisse']} | **Sinyal:** {top['Sinyal']} "
+                    f"| **Kalite Skoru:** {top['Kalite']} | **Smart Money:** {top['Smart Money Skor']}"
+                )
+
+                m1, m2, m3, m4 = st.columns(4)
+                m1.metric("Toplam", len(df))
+                m2.metric("AL", int((df["Sinyal"] == "AL").sum()))
+                m3.metric("Ort Guven", round(float(df["Guven"].mean()), 1))
+                m4.metric("Ort Risk", round(float(df["Dusus Riski"].mean()), 1))
+
+                tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs(["⭐ Kalite Sirala", "📉 Dip", "🚀 Breakout", "📈 Momentum", "💥 Hacim Patlaması", "🗜️ Bollinger Sıkışması"])
+
+                with tab1:
+                    # Kalite = Skor - Risk*0.4 + Guven*0.25 (bilesik en iyi siralama)
+                    g = df.sort_values(by=["Kalite", "Skor", "Guven"], ascending=False)
+                    
+                    # Seçilebilir Dataframe Etkileşimi Eklendi (Streamlit'in yeni özelliği)
+                    event = st.dataframe(
+                        g.style.map(signal_style, subset=["Sinyal"]).map(action_style, subset=["Aksiyon"]),
+                        use_container_width=True, 
+                        height=650,
+                        on_select="rerun",
+                        selection_mode="single-row"
+                    )
+                    
+                    # Eğer kullanıcı satıra tıklarsa o hisseyi session'a kaydet (Backtest sekmesine aktarmak için)
+                    if len(event.selection.rows) > 0:
+                        selected_idx = event.selection.rows[0]
+                        st.session_state.selected_ticker = g.iloc[selected_idx]["Hisse"]
+                        st.success(f"📌 {st.session_state.selected_ticker} seçildi! Geriye Dönük Test sekmesine gidebilirsiniz.")
+
+                with tab2:
+                    # En yuksek dip skoru: asiri satimdan toparlanan, destek yakinindaki hisseler
+                    d = df.sort_values(by=["Dip Skor", "Kalite"], ascending=False)
+                    st.dataframe(d.style.map(signal_style, subset=["Sinyal"]).map(action_style, subset=["Aksiyon"]), use_container_width=True, height=650)
+
+                with tab3:
+                    # En yuksek breakout skoru: direnc kiran, hacim destekli hisseler
+                    b = df.sort_values(by=["Breakout Skor", "Kalite"], ascending=False)
+                    st.dataframe(b.style.map(signal_style, subset=["Sinyal"]).map(action_style, subset=["Aksiyon"]), use_container_width=True, height=650)
+
+                with tab4:
+                    # En yuksek momentum: MACD genisleme + ROC + RSI boga bolgesi
+                    m = df.sort_values(by=["Momentum Skor", "Kalite"], ascending=False)
+                    st.dataframe(m.style.map(signal_style, subset=["Sinyal"]).map(action_style, subset=["Aksiyon"]), use_container_width=True, height=650)
+                    
+                with tab5:
+                    # Hacim patlaması en yüksekten en düşüğe (Hacim Spike >= 2.0 olanlar)
+                    v = df[df["Hacim Spike"] >= 2.0].sort_values(by=["Hacim Spike", "Kalite"], ascending=[False, False])
+                    if v.empty:
+                        st.info("Şu an 2x ve üzeri hacim patlaması yaşayan hisse bulunmuyor.")
+                    else:
+                        st.dataframe(v.style.map(signal_style, subset=["Sinyal"]).map(action_style, subset=["Aksiyon"]), use_container_width=True, height=650)
+                        
+                with tab6:
+                    # Bollinger daralması (Squeeze) algoritmik şartını geçenler (Son 50 mumluk %20'lik sıkışma)
+                    s = df[df["Daralma (Squeeze)"] == "🗜 İzlenir"].sort_values(by=["Bollinger Genisligi", "Kalite"], ascending=[True, False])
+                    if s.empty:
+                        st.info("Şu an Bollinger bantları yeterince daralan (VCP - Squeeze Modunda olan) hisse bulunmuyor.")
+                    else:
+                        st.dataframe(s.style.map(signal_style, subset=["Sinyal"]).map(action_style, subset=["Aksiyon"]), use_container_width=True, height=650)
+
+        if errs:
+            with st.expander("Veri Hatalari"):
+                for e in errs[:200]:
+                    st.error(e)
+
+    with main_tab2:
+        st.markdown("Seçtiğiniz hissenin geçmiş **1500 mumluk verisi** üzerinden, sıfırdan sisteme dahil olup **'AL'** sinyali oluştuğunda paranın tamamıyla işlem yapılır. Kâr alma seviyesi **4.0x ATR**, zarar durdurma (Stop) seviyesi **2.0x ATR** olarak ve **15 mum luk zaman kısıtı / EMA20 kırılım şartlarıyla** (Trend Takip Modu) otomatik çalışır.")
+        
+        b1, b2, b3 = st.columns(3)
+        with b1:
+            # Seçili hisseyi (varsa) otomatik olarak input'a aktar
+            default_sym = st.session_state.get("selected_ticker", "NVDA")
+            bt_sym = st.text_input("Test Edilecek Hisse", default_sym).upper()
+        with b2:
+            bt_tf = st.selectbox("Zaman Dilimi", list(TIMEFRAME_OPTIONS.keys()), index=1, key="bt_tf_selectbox")
+        with b3:
+            bt_capital = st.number_input("Başlangıç Sermayesi ($)", value=10000)
+            
+        if st.button("Simülasyonu Başlat", type="primary", key="bt_run"):
+            trades_df, stats, base_df, vbt_portfolio = run_backtest(bt_sym, st.session_state.piyasa, bt_tf, bt_capital)
+            
+            if not trades_df.empty:
+                st.subheader(f"📊 Performans Özeti: {bt_sym} ({bt_tf})")
+                k1, k2, k3, k4 = st.columns(4)
+                
+                p_color = "normal" if stats['Toplam Getiri (%)'] >= 0 else "inverse"
+                
+                k1.metric("Final Bakiye", f"${stats['Final Bakiye ($)']}", f"%{stats['Toplam Getiri (%)']}", delta_color=p_color)
+                k2.metric("Toplam İşlem", stats['Toplam İşlem'])
+                k3.metric("Kazanma Oranı", f"%{stats['Kazanma Oranı (%)']}")
+                k4.metric("K/Z İşlemler", f"{stats['Kazançlı İşlem']} / {stats['Zararlı İşlem']}")
+                
+                st.divider()
+                
+                m1, m2, m3, m4 = st.columns(4)
+                m1.metric("Profit Factor", stats['Profit Factor'])
+                m2.metric("Ort Kazanç/Zarar", f"${stats['Ortalama Kazanç ($)']} / ${stats['Ortalama Zarar ($)']}")
+                m3.metric("Max Drawdown", f"%{stats['Max Drawdown (%)']}")
+                m4.metric("Expectancy", f"${stats['Expectancy ($)']}")
+                
+                st.divider()
+                
+                st.subheader("📈 Profesyonel Portföy Grafiği (VectorBT)")
+                if vbt_portfolio is not None:
+                    fig = vbt_portfolio.plot()
+                    fig.update_layout(template="plotly_dark", height=500, margin=dict(t=30, b=30, l=30, r=30), paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)")
+                    st.plotly_chart(fig, use_container_width=True)
+                    
+                    st.subheader("📉 Drawdown (Maksimum Kayıp) Analizi")
+                    fig_dd = vbt_portfolio.plot_underwater()
+                    fig_dd.update_layout(template="plotly_dark", height=300, margin=dict(t=30, b=30, l=30, r=30), paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)")
+                    st.plotly_chart(fig_dd, use_container_width=True)
+                else:
+                    st.line_chart(base_df["close"], use_container_width=True)
+                
+                c_macd, c_rsi = st.columns(2)
+                with c_macd:
+                    st.caption("MACD Histogramı")
+                    st.bar_chart(base_df["macd_hist"], use_container_width=True)
+                with c_rsi:
+                    st.caption("RSI (Göreceli Güç Endeksi)")
+                    st.line_chart(base_df["rsi"], use_container_width=True)
+                
+                st.subheader("📝 İşlem Geçmişi (Son İşlemler Üstte)")
+                st.dataframe(trades_df.iloc[::-1], use_container_width=True)
+                
+            elif stats:
+                st.warning("Bu hisse ve zaman dilimi için geçmiş tarihte uygulamanın kriterlerine uyan bir AL sinyali oluşmamıştır.")
+
+            # --- YENİ EKLENTİ: TEMEL ANALİZ (YFINANCE) ---
+            st.divider()
+            st.subheader(f"🏢 {bt_sym} Şirket Temel Analizi")
+            
+            # FIX: Market string karışıklığı düzeltildi
+            yf_ticker = f"{bt_sym}.IS" if st.session_state.piyasa == "BIST" else bt_sym
+            
+            with st.spinner("Şirket temel analizi ve bilançosu yükleniyor..."):
+                yf_data = fetch_yf_data(yf_ticker, st.session_state.piyasa)
+                
+                if yf_data.get("error"):
+                    err_msg = yf_data["error"]
+                    if "Too Many Requests" in err_msg or "Rate limited" in err_msg or "429" in err_msg:
+                        st.error("⚠️ Yahoo Finance veri limitine ulaşıldı (Çok fazla sık istek atıldı). Lütfen 10-15 dakika bekledikten sonra tekrar deneyiniz.")
+                    else:
+                        st.error(f"Finasal veri çekilirken /yfinance/ bir hata oluştu: {err_msg}")
+                else:
+                    info = yf_data["info"]
+                    
+                    # Sütunlar: 1. Şirket Özeti | 2. Önemli Çarpanlar
+                    col_info, col_ratios = st.columns(2)
+                    
+                    with col_info:
+                        st.markdown("#### 📌 Genel Bilgiler")
+                        st.markdown(f"**Şirket Adı:** {info.get('longName', 'Bilinmiyor')}")
+                        st.markdown(f"**Sektör/Endüstri:** {info.get('sector', 'Bilinmiyor')} / {info.get('industry', 'Bilinmiyor')}")
+                        
+                        market_cap = info.get('marketCap', 0)
+                        if market_cap > 0:
+                            mc_text = f"{market_cap / 1e9:.2f} Milyar"
+                            st.markdown(f"**Piyasa Değeri:** {mc_text}")
+                        else:
+                            st.markdown("**Piyasa Değeri:** Bilinmiyor")
+                            
+                        st.markdown(f"**Çalışan Sayısı:** {info.get('fullTimeEmployees', 'Bilinmiyor')}")
+                        
+                    with col_ratios:
+                        st.markdown("#### 🧮 Önemli Çarpanlar")
+                        st.markdown(f"**F/K Oranı (P/E):** {info.get('trailingPE', 'Hesaplanamadı / Zarar')}")
+                        st.markdown(f"**P/D Oranı (P/B):** {info.get('priceToBook', 'Bilinmiyor')}")
+                        
+                        div = info.get('dividendYield', None)
+                        st.markdown(f"**Temettü Verimliliği:** %{round(div*100, 2) if div else 'Yok'}")
+                        st.markdown(f"**Hisse Başına Kazanç (EPS):** {info.get('trailingEps', 'Bilinmiyor')}")
+                        
+                    # Alt Sekmeler: Gelir Tablosu - Bilanço - Nakit Akışı
+                    st.markdown("#### 📊 Finansal Tablolar (Son 4 Dönem)")
+                    ftab1, ftab2, ftab3 = st.tabs(["Gelir Tablosu", "Bilanço", "Nakit Akış Tablosu"])
+                    
+                    with ftab1:
+                        gelir = yf_data["financials"]
+                        if gelir is not None and not gelir.empty:
+                            # Tablonun yönünü çevir (Transpoze) - Sütun isimlerinden saat kısımlarını at
+                            gelir.columns = [str(c).split(" ")[0] for c in gelir.columns] 
+                            st.dataframe(gelir.head(15), use_container_width=True)
+                        else:
+                            st.info("Gelir tablosu verisi bulunamadı.")
+                            
+                    with ftab2:
+                        bilanco = yf_data["balance"]
+                        if bilanco is not None and not bilanco.empty:
+                            bilanco.columns = [str(c).split(" ")[0] for c in bilanco.columns] 
+                            st.dataframe(bilanco.head(15), use_container_width=True)
+                        else:
+                            st.info("Bilanço verisi bulunamadı.")
+                            
+                    with ftab3:
+                        nakit = yf_data["cashflow"]
+                        if nakit is not None and not nakit.empty:
+                            nakit.columns = [str(c).split(" ")[0] for c in nakit.columns]
+                            st.dataframe(nakit.head(15), use_container_width=True)
+                        else:
+                            st.info("Nakit akış verisi bulunamadı.")
+
+# init_gui define and call
+if __name__ == "__main__":
+    init_gui()
+
 
 def inject_custom_css():
     st.markdown("""
@@ -90,13 +460,15 @@ def inject_custom_css():
     </style>
     """, unsafe_allow_html=True)
 
-inject_custom_css()
+    # init_gui() fonksiyonu içinde çağrılıyor.
+    pass
 
-st.markdown('<p class="main-title">⚡ Gelişmiş Algoritmik Tarayıcı</p>', unsafe_allow_html=True)
-st.caption("Veri Odaklı Kantitatif Yatırım Terminali (VCP, Smart Money & Bollinger Squeeze)")
+# inject_custom_css() # Globalden kaldırıldı
+
+# init_gui() fonksiyonu UI kodlarını kapsayacak şekilde aşağıda tanımlanacak.
 
 DEFAULT_NASDAQ_HISSELER = [
-    # === NASDAQ Top Hisseler ===
+    # === NASDAQ Top & Popular Hisseler ===
     "AAPL", "MSFT", "GOOG", "GOOGL", "AMZN", "NVDA", "META", "TSLA", "AVGO", "PEP",
     "COST", "CSCO", "TMUS", "ADBE", "TXN", "QCOM", "AMGN", "INTU", "ISRG", "CMCSA",
     "AMD", "HON", "NFLX", "SBUX", "GILD", "BKNG", "AMAT", "ADI", "MDLZ", "VRTX",
@@ -106,7 +478,11 @@ DEFAULT_NASDAQ_HISSELER = [
     "CPRT", "MRVL", "EA", "PCAR", "ILMN", "FAST", "VRSK", "CEG", "EXC", "DLTR",
     "VRSN", "ALGN", "WBA", "BKR", "BMRN", "SWKS", "CDW", "TSCO", "SIRI", "ZM",
     "CRSP", "DOCU", "PLTR", "RIVN", "LCID", "COIN", "U", "DKNG", "HOOD", "AFRM",
-    "JD", "PDD", "BIDU", "NTES", "BABA", "TCEHY", "NIO", "XPEV", "LI"
+    "JD", "PDD", "BIDU", "NTES", "BABA", "TCEHY", "NIO", "XPEV", "LI",
+    # Eklenen Popüler Hisseler (AI, Yarı İletken & Enerji)
+    "SMCI", "ARM", "MSTR", "TGT", "WMT", "JPM", "BAC", "GS", "MS", "CVX", "XOM", "UNH",
+    "LLY", "V", "MA", "ABBV", "KO", "PFE", "DIS", "NKE", "VZ", "T", "BA", "CAT",
+    "IBM", "ORCL", "CRM", "INTC", "UBER", "ABNB", "SHOP", "SQ", "SE", "SNAP", "DASH"
 ]
 
 DEFAULT_BIST_HISSELER = [
@@ -663,14 +1039,15 @@ def fetch_hist(tv, symbol: str, exchange: str, interval, bars: int, retries: int
 
 
 @st.cache_resource(ttl=3600*24, show_spinner="🤖 Yapay Zeka Modeli Eğitiliyor... (İlk Taramaya Özel Bekleyiniz)")
-def get_ai_model(market: str, tf_name: str) -> tuple:
+def get_ai_model(market: str, tf_name: str, tv=None) -> tuple:
     try:
         from sklearn.ensemble import RandomForestClassifier
     except ImportError:
         return None, None
         
-    from tvDatafeed import TvDatafeed
-    tv = TvDatafeed()
+    if tv is None:
+        from tvDatafeed import TvDatafeed
+        tv = TvDatafeed()
     tf = TIMEFRAME_OPTIONS[tf_name]
     
     # Hedef endeks
@@ -733,13 +1110,14 @@ def run_scan(
     done_count = [0]  # mutablб sayac (thread-safe icin liste)
 
     # === YAPAY ZEKA MODELİNİ YÜKLE / EĞİT ===
-    ai_model, ai_features = get_ai_model(exchange, tf_name)
+    from tvDatafeed import TvDatafeed
+    tv_shared = TvDatafeed()
+    ai_model, ai_features = get_ai_model(exchange, tf_name, tv=tv_shared)
 
     # FIX: Per-worker delay ekle
-    def scan_one(sym: str, worker_id: int = 0) -> Optional[Dict[str, object]]:
+    def scan_one(sym: str, tv_instance, worker_id: int = 0) -> Optional[Dict[str, object]]:
         try:
-            from tvDatafeed import TvDatafeed
-            tv = TvDatafeed()
+            tv = tv_instance
             base_raw = fetch_hist(tv, sym, exchange, interval_obj(tf["base"]), tf["bars"], retries=3)
             conf_raw = fetch_hist(tv, sym, exchange, interval_obj(tf["confirm"]), tf["confirm_bars"], retries=3)
             base = add_indicators(base_raw)
@@ -790,19 +1168,21 @@ def run_scan(
         except Exception as e:
             return {"_err": f"{sym}: {e}"}
         finally:
+            # Bot tespitini zorlaştırmak için her istekten sonra rastgele küçük gecikmeler ekle (Jitter)
             if workers == 1:
-                # Serial mode: delay uygulanır
-                time.sleep(max(delay_ms, 0) / 1000)
+                # Serial mode: delay + jitter
+                time.sleep((max(delay_ms, 0) / 1000) + random.uniform(0.1, 0.4))
             else:
-                # Parallel mode: per-worker delay + base delay
-                per_worker_delay = 0.3 + (worker_id * 0.1)
+                # Parallel mode: per-worker offset + jitter
+                # Per-worker delay: worker_id'ye göre kaydırarak aynı anda yüklenmeyi önle
+                per_worker_delay = 0.4 + (worker_id * 0.2) + random.uniform(0.05, 0.3)
                 time.sleep(per_worker_delay)
 
     if workers > 1:
         # Paralel mod: ThreadPoolExecutor ile coklu baglanti
         with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as ex:
             # Worker ID'ler ile task'ları eşle
-            futures = {ex.submit(scan_one, sym, i % workers): sym for i, sym in enumerate(symbols)}
+            futures = {ex.submit(scan_one, sym, tv_shared, i % workers): sym for i, sym in enumerate(symbols)}
             for i, fut in enumerate(concurrent.futures.as_completed(futures), start=1):
                 sym    = futures[fut]
                 try:
@@ -823,7 +1203,7 @@ def run_scan(
         for i, sym in enumerate(symbols, start=1):
             if gui and t:
                 t.write(f"Taraniyor: {sym} ({i}/{len(symbols)})")
-            result = scan_one(sym, worker_id=0)
+            result = scan_one(sym, tv_shared, worker_id=0)
             if result is None:
                 pass
             elif "_err" in result:
@@ -1024,383 +1404,5 @@ def run_backtest(symbol: str, exchange: str, tf_name: str, initial_capital: floa
         
         return pd.DataFrame(trades), stats, base, portfolio
 
-
-if "piyasa" not in st.session_state:
-    st.session_state.piyasa = "NASDAQ"
-
-piyasa = st.sidebar.radio("🌐 Piyasa Seçimi", ["NASDAQ", "BIST"], index=0 if st.session_state.piyasa == "NASDAQ" else 1)
-
-st.sidebar.markdown("---")
-st.sidebar.subheader("📲 Telegram Bildirimleri")
-st.sidebar.caption("Taramalar bittiğinde sonuçları cebinize gönderin.")
-telegram_token = st.sidebar.text_input("Telegram Bot Token", type="password", key="tg_token_input", value="8336526803:AAFDV687CJzXz7J692hagcx4CiCKFoZm8f8", help="@BotFather üzerinden alabilirsiniz.")
-telegram_chat_id = st.sidebar.text_input("Telegram Chat ID", key="tg_chat_id_input", value="1070470722", help="@userinfobot üzerinden alabilirsiniz.")
-
-def send_telegram_message(token, chat_id, message):
-    import requests
-    url = f"https://api.telegram.org/bot{token}/sendMessage"
-    payload = {"chat_id": chat_id, "text": message, "parse_mode": "Markdown"}
-    try:
-        response = requests.post(url, data=payload, timeout=5)
-        return response.ok
-    except Exception:
-        return False
-
-if piyasa != st.session_state.piyasa:
-    st.session_state.piyasa = piyasa
-    if piyasa == "NASDAQ":
-        st.session_state.symbols_text = ", ".join(DEFAULT_NASDAQ_HISSELER)
-    else:
-        st.session_state.symbols_text = ", ".join(DEFAULT_BIST_HISSELER)
-    st.session_state.scan_df = pd.DataFrame()
-    st.session_state.scan_errs = []
-    st.rerun()
-
-if "symbols_text" not in st.session_state:
-    st.session_state.symbols_text = ", ".join(DEFAULT_NASDAQ_HISSELER) if st.session_state.piyasa == "NASDAQ" else ", ".join(DEFAULT_BIST_HISSELER)
-if "scan_df" not in st.session_state:
-    st.session_state.scan_df = pd.DataFrame()
-if "scan_errs" not in st.session_state:
-    st.session_state.scan_errs = []
-
-main_tab1, main_tab2 = st.tabs(["🚀 Sistem Taraması (Screener)", "⏪ Geriye Dönük Test (Backtest)"])
-
-with main_tab1:
-    st.subheader(f"{st.session_state.piyasa} Taraması")
-    symbols_input = st.text_area(f"{st.session_state.piyasa} Semboller (virgulle ayir)", key="symbols_text", height=120)
-    symbols = uniq([x.strip().upper() for x in symbols_input.split(",") if x.strip()])
-
-    c1, c2, c3, c4 = st.columns(4)
-    with c1:
-        tf_name = st.selectbox("Zaman Dilimi", list(TIMEFRAME_OPTIONS.keys()), index=0) # 4 Saatlik varsayılan
-    with c2:
-        delay_ms = st.slider("Sembol Gecikme (ms)", 300, 2000, 500, 50)
-    with c3:
-        workers = st.selectbox(
-            "⚡ Paralel Baglanti",
-            options=[1, 2, 3, 4, 5],
-            index=2,  # Varsayilan olarak guvenli "3" secili gelsin
-            help="1 = siradizimli (guvenli), 3-5 = paralel (hizli ama veri kopma riski var)",
-        )
-    with c4:
-        only_buy = st.checkbox("Sadece AL", value=False)
-
-    # Tahmini sure goster (Her hissenin ag baglanti maliyeti artik ~0.3s)
-    est_sec = len(symbols) * (delay_ms / 1000 + 0.6) / max(workers, 1)
-    if workers > 1:
-        est_sec += 3 # Threading havuzu baslatma suresini ekle
-
-    st.caption(
-        f"📊 {len(symbols)} hisse | "
-        f"⏱ Tahmini sure: ~{int(est_sec // 60)}d {int(est_sec % 60)}s "
-        f"({workers} baglanti ile)"
-    )
-
-    if st.button("Taramayi Baslat", type="primary"):
-        df_res, err_res = run_scan(symbols, st.session_state.piyasa, tf_name, delay_ms, workers=workers)
-        st.session_state.scan_df = df_res
-        st.session_state.scan_errs = err_res
-        st.session_state.scan_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-
-        # --- TELEGRAM BİLDİRİMİ GÖNDER ---
-        if st.session_state.get("tg_token_input") and st.session_state.get("tg_chat_id_input") and not df_res.empty:
-            buy_signals = df_res[df_res["Sinyal"] == "AL"]
-            if not buy_signals.empty:
-                # Kaliteye göre sırala ve en iyi 5'ini al
-                top_buys = buy_signals.sort_values(by="Kalite", ascending=False).head(5)
-                msg = f"🚀 *YENİ TARAMA SONUÇLARI ({st.session_state.piyasa} - {tf_name})*\n\n"
-                for idx, row in top_buys.iterrows():
-                    ai_tahmin = row.get('AI Tahmin', '-')
-                    msg += f"📌 *{row['Hisse']}*\n"
-                    msg += f"   ➤ Kalite: *{row['Kalite']}*\n"
-                    msg += f"   ➤ Aksiyon: {row['Aksiyon']}\n"
-                    msg += f"   ➤ R/R Oranı: {row['R/R']}\n"
-                    msg += f"   ➤ AI Tahmin: {ai_tahmin}\n\n"
-                
-                success = send_telegram_message(st.session_state.tg_token_input, st.session_state.tg_chat_id_input, msg)
-                if success:
-                    st.toast("✅ Sonuçlar Telegram'a başarıyla gönderildi!")
-                else:
-                    st.toast("❌ Telegram'a gönderilirken hata oluştu (Token veya Chat ID hatalı).", icon="🚨")
-
-    df = st.session_state.scan_df.copy()
-    errs = st.session_state.scan_errs
-
-    # Son tarama zamanini goster (varsa)
-    if "scan_time" in st.session_state:
-        st.caption(f"🕐 Son tarama: {st.session_state.scan_time}")
-
-    if df.empty:
-        st.info("Tarama baslatildiginda sonuclar burada gorunecek.")
-    else:
-        if only_buy:
-            df = df[df["Sinyal"] == "AL"].copy()
-        if df.empty:
-            st.warning("Filtrede sonuc yok. Filtreyi gevsetin.")
-        else:
-            top = df.iloc[0]
-            st.success(
-                f"� **Sistem Tavsiyesi (Top 1):** {top['Hisse']} | **Sinyal:** {top['Sinyal']} "
-                f"| **Kalite Skoru:** {top['Kalite']} | **Smart Money:** {top['Smart Money Skor']}"
-            )
-
-            m1, m2, m3, m4 = st.columns(4)
-            m1.metric("Toplam", len(df))
-            m2.metric("AL", int((df["Sinyal"] == "AL").sum()))
-            m3.metric("Ort Guven", round(float(df["Guven"].mean()), 1))
-            m4.metric("Ort Risk", round(float(df["Dusus Riski"].mean()), 1))
-
-            tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs(["⭐ Kalite Sirala", "📉 Dip", "🚀 Breakout", "📈 Momentum", "💥 Hacim Patlaması", "🗜️ Bollinger Sıkışması"])
-
-            with tab1:
-                # Kalite = Skor - Risk*0.4 + Guven*0.25 (bilesik en iyi siralama)
-                g = df.sort_values(by=["Kalite", "Skor", "Guven"], ascending=False)
-                
-                # Seçilebilir Dataframe Etkileşimi Eklendi (Streamlit'in yeni özelliği)
-                event = st.dataframe(
-                    g.style.map(signal_style, subset=["Sinyal"]).map(action_style, subset=["Aksiyon"]),
-                    use_container_width=True, 
-                    height=650,
-                    on_select="rerun",
-                    selection_mode="single-row"
-                )
-                
-                # Eğer kullanıcı satıra tıklarsa o hisseyi session'a kaydet (Backtest sekmesine aktarmak için)
-                if len(event.selection.rows) > 0:
-                    selected_idx = event.selection.rows[0]
-                    st.session_state.selected_ticker = g.iloc[selected_idx]["Hisse"]
-                    st.success(f"📌 {st.session_state.selected_ticker} seçildi! Geriye Dönük Test sekmesine gidebilirsiniz.")
-
-            with tab2:
-                # En yuksek dip skoru: asiri satimdan toparlanan, destek yakinindaki hisseler
-                d = df.sort_values(by=["Dip Skor", "Kalite"], ascending=False)
-                st.dataframe(d.style.map(signal_style, subset=["Sinyal"]).map(action_style, subset=["Aksiyon"]), use_container_width=True, height=650)
-
-            with tab3:
-                # En yuksek breakout skoru: direnc kiran, hacim destekli hisseler
-                b = df.sort_values(by=["Breakout Skor", "Kalite"], ascending=False)
-                st.dataframe(b.style.map(signal_style, subset=["Sinyal"]).map(action_style, subset=["Aksiyon"]), use_container_width=True, height=650)
-
-            with tab4:
-                # En yuksek momentum: MACD genisleme + ROC + RSI boga bolgesi
-                m = df.sort_values(by=["Momentum Skor", "Kalite"], ascending=False)
-                st.dataframe(m.style.map(signal_style, subset=["Sinyal"]).map(action_style, subset=["Aksiyon"]), use_container_width=True, height=650)
-                
-            with tab5:
-                # Hacim patlaması en yüksekten en düşüğe (Hacim Spike >= 2.0 olanlar)
-                v = df[df["Hacim Spike"] >= 2.0].sort_values(by=["Hacim Spike", "Kalite"], ascending=[False, False])
-                if v.empty:
-                    st.info("Şu an 2x ve üzeri hacim patlaması yaşayan hisse bulunmuyor.")
-                else:
-                    st.dataframe(v.style.map(signal_style, subset=["Sinyal"]).map(action_style, subset=["Aksiyon"]), use_container_width=True, height=650)
-                    
-            with tab6:
-                # Bollinger daralması (Squeeze) algoritmik şartını geçenler (Son 50 mumluk %20'lik sıkışma)
-                s = df[df["Daralma (Squeeze)"] == "🗜 İzlenir"].sort_values(by=["Bollinger Genisligi", "Kalite"], ascending=[True, False])
-                if s.empty:
-                    st.info("Şu an Bollinger bantları yeterince daralan (VCP - Squeeze Modunda olan) hisse bulunmuyor.")
-                else:
-                    st.dataframe(s.style.map(signal_style, subset=["Sinyal"]).map(action_style, subset=["Aksiyon"]), use_container_width=True, height=650)
-
-    if errs:
-        with st.expander("Veri Hatalari"):
-            for e in errs[:200]:
-                st.error(e)
-
-with main_tab2:
-    st.markdown("Seçtiğiniz hissenin geçmiş **1500 mumluk verisi** üzerinden, sıfırdan sisteme dahil olup **'AL'** sinyali oluştuğunda paranın tamamıyla işlem yapılır. Kâr alma seviyesi **4.0x ATR**, zarar durdurma (Stop) seviyesi **2.0x ATR** olarak ve **15 mum luk zaman kısıtı / EMA20 kırılım şartlarıyla** (Trend Takip Modu) otomatik çalışır.")
-    
-    b1, b2, b3 = st.columns(3)
-    with b1:
-        # Seçili hisseyi (varsa) otomatik olarak input'a aktar
-        default_sym = st.session_state.get("selected_ticker", "NVDA")
-        bt_sym = st.text_input("Test Edilecek Hisse", default_sym).upper()
-    with b2:
-        bt_tf = st.selectbox("Zaman Dilimi", list(TIMEFRAME_OPTIONS.keys()), index=1, key="bt_tf_selectbox")
-    with b3:
-        bt_capital = st.number_input("Başlangıç Sermayesi ($)", value=10000)
-        
-    if st.button("Simülasyonu Başlat", type="primary", key="bt_run"):
-        trades_df, stats, base_df, vbt_portfolio = run_backtest(bt_sym, st.session_state.piyasa, bt_tf, bt_capital)
-        
-        if not trades_df.empty:
-            st.subheader(f"📊 Performans Özeti: {bt_sym} ({bt_tf})")
-            k1, k2, k3, k4 = st.columns(4)
-            
-            p_color = "normal" if stats['Toplam Getiri (%)'] >= 0 else "inverse"
-            
-            k1.metric("Final Bakiye", f"${stats['Final Bakiye ($)']}", f"%{stats['Toplam Getiri (%)']}", delta_color=p_color)
-            k2.metric("Toplam İşlem", stats['Toplam İşlem'])
-            k3.metric("Kazanma Oranı", f"%{stats['Kazanma Oranı (%)']}")
-            k4.metric("K/Z İşlemler", f"{stats['Kazançlı İşlem']} / {stats['Zararlı İşlem']}")
-            
-            st.divider()
-            
-            m1, m2, m3, m4 = st.columns(4)
-            m1.metric("Profit Factor", stats['Profit Factor'])
-            m2.metric("Ort Kazanç/Zarar", f"${stats['Ortalama Kazanç ($)']} / ${stats['Ortalama Zarar ($)']}")
-            m3.metric("Max Drawdown", f"%{stats['Max Drawdown (%)']}")
-            m4.metric("Expectancy", f"${stats['Expectancy ($)']}")
-            
-            st.divider()
-            
-            st.subheader("📈 Profesyonel Portföy Grafiği (VectorBT)")
-            if vbt_portfolio is not None:
-                fig = vbt_portfolio.plot()
-                fig.update_layout(template="plotly_dark", height=500, margin=dict(t=30, b=30, l=30, r=30), paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)")
-                st.plotly_chart(fig, use_container_width=True)
-                
-                st.subheader("📉 Drawdown (Maksimum Kayıp) Analizi")
-                fig_dd = vbt_portfolio.plot_underwater()
-                fig_dd.update_layout(template="plotly_dark", height=300, margin=dict(t=30, b=30, l=30, r=30), paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)")
-                st.plotly_chart(fig_dd, use_container_width=True)
-            else:
-                st.line_chart(base_df["close"], use_container_width=True)
-            
-            c_macd, c_rsi = st.columns(2)
-            with c_macd:
-                st.caption("MACD Histogramı")
-                st.bar_chart(base_df["macd_hist"], use_container_width=True)
-            with c_rsi:
-                st.caption("RSI (Göreceli Güç Endeksi)")
-                st.line_chart(base_df["rsi"], use_container_width=True)
-            
-            st.subheader("📝 İşlem Geçmişi (Son İşlemler Üstte)")
-            st.dataframe(trades_df.iloc[::-1], use_container_width=True)
-            
-        elif stats:
-            st.warning("Bu hisse ve zaman dilimi için geçmiş tarihte uygulamanın kriterlerine uyan bir AL sinyali oluşmamıştır.")
-
-        # --- YENİ EKLENTİ: TEMEL ANALİZ (YFINANCE) ---
-        st.divider()
-        st.subheader(f"🏢 {bt_sym} Şirket Temel Analizi")
-        
-        # FIX: Market string karışıklığı düzeltildi
-        yf_ticker = f"{bt_sym}.IS" if st.session_state.piyasa == "BIST" else bt_sym
-        
-        # FIX: YFinance cache key'e market ekle + Retry loop ekle
-        @st.cache_data(ttl=3600, show_spinner=False)
-        def fetch_yf_data(ticker_symbol: str, market: str = "NASDAQ") -> dict:
-            import requests
-            
-            # Eğer BIST hissesi ise, bilançoyu isyatirimhisse'den çekiyoruz
-            isy_financials = None
-            if ticker_symbol.endswith(".IS"):
-                try:
-                    import isyatirimhisse as isy
-                    # isyatirimhisse sembolü uzantısız ister (örn: BIMAS)
-                    isy_sym = ticker_symbol.replace(".IS", "")
-                    isy_financials = isy.fetch_financials(symbols=isy_sym, exchange="TRY")
-                except:
-                    pass
-            
-            user_agents = [
-                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
-                "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.3.1 Safari/605.1.15",
-                "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:123.0) Gecko/20100101 Firefox/123.0",
-                "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36"
-            ]
-            
-            # FIX: Retry loop ekle (exponential backoff)
-            last_err = None
-            for attempt in range(3):
-                try:
-                    session = requests.Session()
-                    session.headers.update({
-                        "User-Agent": random.choice(user_agents),
-                        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
-                        "Accept-Language": "en-US,en;q=0.5",
-                        "Connection": "keep-alive"
-                    })
-                    
-                    time.sleep(random.uniform(1.0, 3.0))
-
-                    tk = yf.Ticker(ticker_symbol, session=session)
-                    
-                    y_fin = tk.financials
-                    # BIST hissesi için isyatirimhisse'den veri geldiyse, tabloda onu göster
-                    if isy_financials is not None and not isy_financials.empty:
-                        y_fin = isy_financials
-                    
-                    return {
-                        "info": tk.info,
-                        "financials": y_fin,
-                        "balance": tk.balance_sheet,
-                        "cashflow": tk.cashflow,
-                        "error": None
-                    }
-                except Exception as e:
-                    last_err = str(e)
-                    wait = (2 ** attempt) + random.uniform(0.5, 1.5)
-                    if attempt < 2:
-                        time.sleep(wait)
-                    continue
-            
-            return {"error": last_err, "info": {}, "financials": None, "balance": None, "cashflow": None}
-
-        with st.spinner("Şirket temel analizi ve bilançosu yükleniyor..."):
-            yf_data = fetch_yf_data(yf_ticker, st.session_state.piyasa)
-            
-            if yf_data.get("error"):
-                err_msg = yf_data["error"]
-                if "Too Many Requests" in err_msg or "Rate limited" in err_msg or "429" in err_msg:
-                    st.error("⚠️ Yahoo Finance veri limitine ulaşıldı (Çok fazla sık istek atıldı). Lütfen 10-15 dakika bekledikten sonra tekrar deneyiniz.")
-                else:
-                    st.error(f"Finasal veri çekilirken /yfinance/ bir hata oluştu: {err_msg}")
-            else:
-                info = yf_data["info"]
-                
-                # Sütunlar: 1. Şirket Özeti | 2. Önemli Çarpanlar
-                col_info, col_ratios = st.columns(2)
-                
-                with col_info:
-                    st.markdown("#### 📌 Genel Bilgiler")
-                    st.markdown(f"**Şirket Adı:** {info.get('longName', 'Bilinmiyor')}")
-                    st.markdown(f"**Sektör/Endüstri:** {info.get('sector', 'Bilinmiyor')} / {info.get('industry', 'Bilinmiyor')}")
-                    
-                    market_cap = info.get('marketCap', 0)
-                    if market_cap > 0:
-                        mc_text = f"{market_cap / 1e9:.2f} Milyar"
-                        st.markdown(f"**Piyasa Değeri:** {mc_text}")
-                    else:
-                        st.markdown("**Piyasa Değeri:** Bilinmiyor")
-                        
-                    st.markdown(f"**Çalışan Sayısı:** {info.get('fullTimeEmployees', 'Bilinmiyor')}")
-                    
-                with col_ratios:
-                    st.markdown("#### 🧮 Önemli Çarpanlar")
-                    st.markdown(f"**F/K Oranı (P/E):** {info.get('trailingPE', 'Hesaplanamadı / Zarar')}")
-                    st.markdown(f"**P/D Oranı (P/B):** {info.get('priceToBook', 'Bilinmiyor')}")
-                    
-                    div = info.get('dividendYield', None)
-                    st.markdown(f"**Temettü Verimliliği:** %{round(div*100, 2) if div else 'Yok'}")
-                    st.markdown(f"**Hisse Başına Kazanç (EPS):** {info.get('trailingEps', 'Bilinmiyor')}")
-                    
-                # Alt Sekmeler: Gelir Tablosu - Bilanço - Nakit Akışı
-                st.markdown("#### 📊 Finansal Tablolar (Son 4 Dönem)")
-                ftab1, ftab2, ftab3 = st.tabs(["Gelir Tablosu", "Bilanço", "Nakit Akış Tablosu"])
-                
-                with ftab1:
-                    gelir = yf_data["financials"]
-                    if gelir is not None and not gelir.empty:
-                        # Tablonun yönünü çevir (Transpoze) - Sütun isimlerinden saat kısımlarını at
-                        gelir.columns = [str(c).split(" ")[0] for c in gelir.columns] 
-                        st.dataframe(gelir.head(15), use_container_width=True)
-                    else:
-                        st.info("Gelir tablosu verisi bulunamadı.")
-                        
-                with ftab2:
-                    bilanco = yf_data["balance"]
-                    if bilanco is not None and not bilanco.empty:
-                        bilanco.columns = [str(c).split(" ")[0] for c in bilanco.columns] 
-                        st.dataframe(bilanco.head(15), use_container_width=True)
-                    else:
-                        st.info("Bilanço verisi bulunamadı.")
-                        
-                with ftab3:
-                    nakit = yf_data["cashflow"]
-                    if nakit is not None and not nakit.empty:
-                        nakit.columns = [str(c).split(" ")[0] for c in nakit.columns]
-                        st.dataframe(nakit.head(15), use_container_width=True)
-                    else:
-                        st.info("Nakit akış verisi bulunamadı.")
+if __name__ == "__main__":
+    init_gui()

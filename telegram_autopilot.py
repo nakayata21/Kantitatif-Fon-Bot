@@ -8,8 +8,8 @@ import threading
 # Ana modelden gerekli verileri al
 from streamlit_app import run_scan, DEFAULT_BIST_HISSELER, DEFAULT_NASDAQ_HISSELER
 
-TOKEN = "8336526803:AAFDV687CJzXz7J692hagcx4CiCKFoZm8f8"
-ALLOWED_CHAT_IDS = ["1070470722"]
+TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
+ALLOWED_CHAT_IDS = [os.environ.get("TELEGRAM_CHAT_ID", "1070470722")]
 DATA_FILE = "latest_scan_results.json"
 
 def send_msg(chat_id, text, reply_markup=None):
@@ -44,9 +44,20 @@ def format_telegram_message(market, df_res):
     msg = f"🚀 *{market} {datetime.now().strftime('%H:%M')} OTOMATİK TARAMA*\n\n"
     for idx, row in top_buys.iterrows():
         ai_tahmin = row.get('AI Tahmin', '-')
+        vol_spike = row.get('Hacim Spike', 0.0)
+        dip_skor = row.get('Dip Skor', 0.0)
+        
+        # Dipten Hacim Patlaması Durumu
+        vol_info = f"📊 Hacim: x{vol_spike}"
+        if vol_spike >= 2.0 and dip_skor >= 70:
+            vol_info = f"🔥 *DİPTEN HACIM PATLAMASI (x{vol_spike})*"
+        elif vol_spike >= 2.0:
+            vol_info = f"💥 Hacim Patlaması (x{vol_spike})"
+
         msg += f"📌 *{row['Hisse']}*\n"
         msg += f"   ➤ Kalite: *{row['Kalite']}*\n"
         msg += f"   ➤ Aksiyon: {row['Aksiyon']}\n"
+        msg += f"   ➤ {vol_info}\n"
         msg += f"   ➤ R/R Oranı: {row['R/R']}\n"
         msg += f"   ➤ AI Tahmin: {ai_tahmin}\n\n"
     return msg
