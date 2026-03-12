@@ -956,11 +956,51 @@ def score_symbol(last: pd.Series, prev: pd.Series, conf_last: pd.Series, market:
     # Risk katsayısı 0.40'tan 0.50'ye çekilerek riskli kağıtlar sıralamada daha da aşağı itildi.
     kalite = general - (risk * 0.50) + (confidence * 0.25)
     
-    # TREN KAÇTI (OVER-EXTENDED) CEZASI
-    # Eğer fiyat EMA20'den (Kısa Vade Ortalama) %12+ kopuksa veya RSI 75'i aştıysa bu hisse aşırı şişkindir.
-    is_overextended = (ema20_dist > 12.0) or (rsi_val >= 75)
-    if is_overextended:
-        kalite *= 0.60  # Puanı %40 oranında acımasızca tırpanla
+    # TREN KAÇTI (OVER-EXTENDED) CEZASI — Kademeli Sistem
+    # Zirve yapmış hisseleri kaliteli sıralamada aşağı çekerek "tepede yakalanma" riskini azalt.
+    
+    sma200_dist = ((close_val - sma200_val) / sma200_val) * 100 if sma200_val > 0 else 0.0
+    
+    overextend_penalty = 1.0  # Ceza çarpanı (1.0 = ceza yok)
+    overextend_reasons = []
+    
+    # EMA20'den uzaklık (kısa vade aşırı şişkinlik)
+    if ema20_dist > 15.0:
+        overextend_penalty *= 0.45  # %55 ceza - çok tehlikeli
+        overextend_reasons.append("⚠️ EMA20'den %15+ Kopuk")
+    elif ema20_dist > 10.0:
+        overextend_penalty *= 0.60  # %40 ceza
+        overextend_reasons.append("⚠️ EMA20'den %10+ Kopuk")
+    elif ema20_dist > 6.0:
+        overextend_penalty *= 0.80  # %20 ceza
+        overextend_reasons.append("⚠️ EMA20'den %6+ Uzaklaştı")
+    
+    # RSI aşırı alım bölgesi
+    if rsi_val >= 80:
+        overextend_penalty *= 0.50
+        overextend_reasons.append("🔴 RSI 80+ (Aşırı Alım)")
+    elif rsi_val >= 70:
+        overextend_penalty *= 0.70
+        overextend_reasons.append("🟡 RSI 70+ (Dikkat)")
+    
+    # SMA200'den aşırı uzaklık (uzun vade balon riski)
+    if sma200_dist > 50.0:
+        overextend_penalty *= 0.50
+        overextend_reasons.append("🎈 SMA200'den %50+ (Balon Riski)")
+    elif sma200_dist > 30.0:
+        overextend_penalty *= 0.75
+        overextend_reasons.append("⚠️ SMA200'den %30+ Uzak")
+    
+    # Son 20 günde %25+ yükselen hisseler (artık tepedeler)
+    if roc20 > 25.0:
+        overextend_penalty *= 0.55
+        overextend_reasons.append("🚀 20 Günde %25+ Yükselmiş")
+    elif roc20 > 15.0:
+        overextend_penalty *= 0.75
+        overextend_reasons.append("📈 20 Günde %15+ Yükselmiş")
+    
+    is_overextended = overextend_penalty < 0.95
+    kalite *= overextend_penalty
         
     kalite = clamp(kalite)
 
@@ -968,7 +1008,7 @@ def score_symbol(last: pd.Series, prev: pd.Series, conf_last: pd.Series, market:
     if is_solid_bottom:
         durumlar.append("🚨 DİPTEN DÖNÜŞ (40+PUAN)")
     if is_overextended:
-        durumlar.append("⚠️ AŞIRI ŞİŞKİN (Tren Kaçmış Olabilir)")
+        durumlar.extend(overextend_reasons)
     
     ozel_durum_str = " | ".join(durumlar) if durumlar else "-"
 
