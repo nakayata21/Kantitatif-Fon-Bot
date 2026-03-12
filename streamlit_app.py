@@ -1129,6 +1129,140 @@ def get_ai_model(market: str, tf_name: str, _tv=None) -> tuple:
     return model, feature_cols
 
 
+def calculate_price_targets(base_df: pd.DataFrame) -> dict:
+    """
+    Çoklu hedef fiyat sistemi.
+    ATR, Fibonacci Extension, Direnç Seviyeleri, Bollinger ve MA birleştirilerek
+    3 kademeli hedef ve stop loss hesaplar.
+    """
+    if base_df is None or len(base_df) < 60:
+        return None
+    
+    last = base_df.iloc[-1]
+    close = float(last["close"])
+    atr = float(_safe_get(last, "atr", 0.0))
+    bb_upper = float(_safe_get(last, "bb_upper", close))
+    sma50 = float(_safe_get(last, "sma50", 0.0))
+    sma200 = float(_safe_get(last, "sma200", 0.0))
+    
+    if atr == 0 or close == 0:
+        return None
+    
+    # === 1. ATR Tabanlı Hedefler ===
+    atr_t1 = close + (2.0 * atr)   # Kısa vade
+    atr_t2 = close + (3.5 * atr)   # Orta vade
+    atr_t3 = close + (5.0 * atr)   # Uzun vade
+    atr_stop = close - (1.5 * atr)  # Stop loss
+    
+    # === 2. Fibonacci Extension Hedefleri ===
+    lookback = min(120, len(base_df) - 1)
+    recent = base_df.tail(lookback)
+    swing_low = float(recent["low"].min())
+    swing_high = float(recent["high"].max())
+    swing_range = swing_high - swing_low
+    
+    # Swing low'dan itibaren Fibonacci extension seviyeleri
+    fib_1272 = swing_low + (swing_range * 1.272)
+    fib_1618 = swing_low + (swing_range * 1.618)
+    fib_2000 = swing_low + (swing_range * 2.000)
+    
+    # Eğer fiyat zaten swing_high'ın üstündeyse extension kullan
+    # Değilse, swing_high'ı direnç olarak kullan
+    if close >= swing_high * 0.98:
+        fib_targets = [fib_1272, fib_1618, fib_2000]
+    else:
+        # Fiyat henüz zirveye ulaşmamış, zirveyi birincil hedef yap
+        fib_targets = [swing_high, fib_1272, fib_1618]
+    
+    # === 3. Direnç Seviyeleri ===
+    res_20 = float(base_df.tail(20)["high"].max())   # 20 günlük direnç
+    res_60 = float(base_df.tail(60)["high"].max())   # 60 günlük direnç
+    res_120 = float(recent["high"].max())              # 120 günlük direnç
+    
+    # === 4. Bollinger & MA Hedefleri ===
+    bb_target = bb_upper if bb_upper > close else close * 1.03
+    ma_targets = []
+    if sma50 > close: ma_targets.append(sma50)
+    if sma200 > close: ma_targets.append(sma200)
+    
+    # === 5. Fibonacci Stop (Destek) Seviyeleri ===
+    support_382 = swing_high - (swing_range * 0.382)  # %38.2 destek
+    support_500 = swing_high - (swing_range * 0.500)  # %50 destek
+    support_618 = swing_high - (swing_range * 0.618)  # %61.8 destek (altın oran)
+    
+    # === AKILLI BİRLEŞTİRME ===
+    # Tüm potansiyel hedefleri topla (sadece mevcut fiyatın üstündekiler)
+    all_targets = []
+    
+    # ATR hedefleri
+    all_targets.extend([(atr_t1, "ATR"), (atr_t2, "ATR"), (atr_t3, "ATR")])
+    
+    # Fibonacci hedefleri
+    for ft in fib_targets:
+        if ft > close * 1.005:  # %0.5'ten fazla yukarıda olanlar
+            all_targets.append((ft, "FIB"))
+    
+    # Direnç seviyeleri
+    for rv, lbl in [(res_20, "R20"), (res_60, "R60"), (res_120, "R120")]:
+        if rv > close * 1.005:
+            all_targets.append((rv, lbl))
+    
+    # Bollinger
+    if bb_target > close * 1.005:
+        all_targets.append((bb_target, "BB"))
+    
+    # MA hedefleri
+    for mv in ma_targets:
+        all_targets.append((mv, "MA"))
+    
+    # Fiyata göre sırala
+    all_targets.sort(key=lambda x: x[0])
+    
+    # Hedefleri 3 bölgeye ayır: Kısa / Orta / Uzun
+    if len(all_targets) == 0:
+        return None
+    
+    # Kısa hedef: En yakın hedeflerden medyan
+    kisa_targets = [t for t in all_targets if t[0] <= close * 1.08]
+    orta_targets = [t for t in all_targets if close * 1.05 < t[0] <= close * 1.18]
+    uzun_targets = [t for t in all_targets if t[0] > close * 1.12]
+    
+    def weighted_avg(targets):
+        if not targets: return None
+        total = sum(t[0] for t in targets)
+        return total / len(targets)
+    
+    t1 = weighted_avg(kisa_targets) if kisa_targets else (close + 1.5 * atr)
+    t2 = weighted_avg(orta_targets) if orta_targets else (close + 3.0 * atr)
+    t3 = weighted_avg(uzun_targets) if uzun_targets else (close + 5.0 * atr)
+    
+    # Hedeflerin sıralı olmasını garantile
+    if t2 <= t1: t2 = t1 * 1.03
+    if t3 <= t2: t3 = t2 * 1.05
+    
+    # Stop Loss: ATR stop ile Fibonacci desteğin ortalaması
+    fib_stop = support_382 if support_382 < close else atr_stop
+    smart_stop = (atr_stop * 0.6 + fib_stop * 0.4)  # ATR ağırlıklı
+    smart_stop = min(smart_stop, close * 0.96)  # Minimum %4 altında
+    
+    # Yüzde hesaplamaları
+    t1_pct = ((t1 - close) / close) * 100
+    t2_pct = ((t2 - close) / close) * 100
+    t3_pct = ((t3 - close) / close) * 100
+    stop_pct = ((smart_stop - close) / close) * 100
+    
+    return {
+        "Hedef 1": round(t1, 2),
+        "Hedef 1 %": round(t1_pct, 1),
+        "Hedef 2": round(t2, 2),
+        "Hedef 2 %": round(t2_pct, 1),
+        "Hedef 3": round(t3, 2),
+        "Hedef 3 %": round(t3_pct, 1),
+        "Stop Loss": round(smart_stop, 2),
+        "Stop %": round(stop_pct, 1),
+        "Fiyat": round(close, 2),
+    }
+
 def run_scan(
     symbols: List[str],
     exchange: str,
@@ -1174,6 +1308,9 @@ def run_scan(
             conf_last = vc.iloc[-1]
             s = score_symbol(last, prev, conf_last, exchange)
 
+            # --- HEDEF FİYAT HESAPLAMASI ---
+            targets = calculate_price_targets(vb)
+
             # --- YAPAY ZEKA TAHMİNİ ---
             ai_prob = 0.0
             if ai_model is not None and ai_features is not None:
@@ -1192,7 +1329,7 @@ def run_scan(
                 if len(prob_res) > 1:
                     ai_prob = prob_res[1] * 100
 
-            return {
+            result = {
                 "Hisse": sym,
                 "AI Tahmin": f"%{round(ai_prob, 1)}" if ai_model else "-",
                 **s,
@@ -1205,6 +1342,12 @@ def run_scan(
                 "Daralma (Squeeze)": "🗜 İzlenir" if bool(_safe_get(last, "bb_squeeze", False)) else "-",
                 "Likidite (TL)": round(float(_safe_get(last, "close", 0.0) * _safe_get(last, "vol_ma20", 0.0)), 0),
             }
+            
+            # Hedef fiyatları ekle
+            if targets:
+                result.update(targets)
+            
+            return result
         except Exception as e:
             return {"_err": f"{sym}: {e}"}
         finally:

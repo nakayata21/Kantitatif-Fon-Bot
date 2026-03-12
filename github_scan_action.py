@@ -105,7 +105,25 @@ def format_telegram_message(market, df_res, status):
         if teknik:
             msg += f"   ➤ Sinyal: {' | '.join(teknik)}\n"
         
-        msg += f"   ➤ R/R Oranı: {row['R/R']}\n\n"
+        # Hedef Fiyatlar
+        fiyat = row.get('Fiyat', 0)
+        h1 = row.get('Hedef 1', 0)
+        h1_pct = row.get('Hedef 1 %', 0)
+        h2 = row.get('Hedef 2', 0)
+        h2_pct = row.get('Hedef 2 %', 0)
+        h3 = row.get('Hedef 3', 0)
+        h3_pct = row.get('Hedef 3 %', 0)
+        stop = row.get('Stop Loss', 0)
+        stop_pct = row.get('Stop %', 0)
+        
+        if h1 and h1 > 0:
+            msg += f"   🎯 *HEDEF FİYATLAR:*\n"
+            msg += f"      1️⃣ {h1} (+%{h1_pct})\n"
+            msg += f"      2️⃣ {h2} (+%{h2_pct})\n"
+            msg += f"      3️⃣ {h3} (+%{h3_pct})\n"
+            msg += f"      🛑 Stop: {stop} ({stop_pct}%)\n"
+        
+        msg += f"\n"
     
     # === DİPTEN HACİM PATLAMASI YAPAN HİSSELER ===
     # Tüm taranmış hisseler arasından (sadece AL sinyali olanlar değil) hacim patlaması yapanları bul
