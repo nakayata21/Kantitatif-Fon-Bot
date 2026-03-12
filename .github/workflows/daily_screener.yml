@@ -26,7 +26,7 @@ jobs:
       - name: Kütüphaneleri Yükle
         run: |
           python -m pip install --upgrade pip
-          pip install streamlit pandas requests yfinance ta scikit-learn numba plotly
+          pip install streamlit pandas requests yfinance ta scikit-learn numba plotly openai
           pip install git+https://github.com/rongardF/tvdatafeed.git
           pip install isyatirimhisse vectorbt || true
           
@@ -35,4 +35,5 @@ jobs:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           TARGET_MARKET: ${{ matrix.market }}
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
         run: python github_scan_action.py

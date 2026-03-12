@@ -12,6 +12,7 @@ TR_TZ = pytz.timezone("Europe/Istanbul")
 TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
 CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
 MARKET = os.environ.get("TARGET_MARKET", "BIST")
+OPENROUTER_API_KEY = os.environ.get("OPENROUTER_API_KEY")
 
 def get_market_status(market="BIST"):
     """Piyasa durumunu kontrol eder: OPEN, PRE_MARKET, CLOSED"""
@@ -107,13 +108,71 @@ def format_telegram_message(market, df_res, status):
         msg += f"   ➤ R/R Oranı: {row['R/R']}\n\n"
     return msg
 
+def get_ai_commentary(market, df_res):
+    """OpenRouter üzerinden AI yorumu alır."""
+    if not OPENROUTER_API_KEY:
+        print("DEBUG: OPENROUTER_API_KEY bulunamadı, AI yorumu atlanıyor.")
+        return None
+    
+    buy_signals = df_res[df_res["Sinyal"] == "AL"]
+    if buy_signals.empty:
+        return None
+    
+    top_buys = buy_signals.sort_values(by="Kalite", ascending=False).head(5)
+    
+    # Tarama verilerini AI'ya gönderilecek metin formatına çevir
+    stock_data = ""
+    for idx, row in top_buys.iterrows():
+        stock_data += f"Hisse: {row['Hisse']}\n"
+        stock_data += f"  Kalite Skoru: {row['Kalite']}\n"
+        stock_data += f"  Sinyal: {row['Sinyal']} | Aksiyon: {row['Aksiyon']}\n"
+        stock_data += f"  RSI: {row.get('RSI', '-')} | ADX: {row.get('ADX', '-')}\n"
+        stock_data += f"  Hacim Spike: x{row.get('Hacim Spike', 0)}\n"
+        stock_data += f"  R/R Oranı: {row.get('R/R', '-')}\n"
+        stock_data += f"  AI Tahmin: {row.get('AI Tahmin', '-')}\n"
+        stock_data += f"  Özel Durum: {row.get('Özel Durum', '-')}\n\n"
+    
+    prompt = f"""Sen profesyonel bir kantitatif borsa analistisin. Aşağıda {market} piyasasından bir algoritmik tarama sonucu var. 
+Bu verileri analiz edip kısa ve öz bir yatırım yorumu yap. Her hisse için 1 satır yaz. 
+Emoji kullan. Türkçe yaz. Toplam maksimum 500 karakter.
+
+Tarama Verileri:
+{stock_data}
+
+Önemli: Sadece yorum yaz, başlık veya açıklama ekleme. Her hisse için tek satır ve kısa ol."""
+    
+    try:
+        from openai import OpenAI
+        
+        client = OpenAI(
+            base_url="https://openrouter.ai/api/v1",
+            api_key=OPENROUTER_API_KEY,
+        )
+        
+        response = client.chat.completions.create(
+            model="nvidia/nemotron-3-super-120b-a12b:free",
+            messages=[
+                {"role": "system", "content": "Sen kısa ve öz yorum yapan bir borsa analistisin. Türkçe yaz."},
+                {"role": "user", "content": prompt}
+            ],
+            max_tokens=600,
+            temperature=0.7,
+        )
+        
+        ai_text = response.choices[0].message.content.strip()
+        print(f"\u2705 AI Yorumu alındı ({len(ai_text)} karakter)")
+        return ai_text
+        
+    except Exception as e:
+        print(f"\u274c AI Yorum Hatası: {str(e)}")
+        return None
+
+
 if __name__ == "__main__":
     status = get_market_status(MARKET)
     
     if status == "CLOSED":
-        # TEST İÇİN: Eğer manuel tetiklendiyse kapalı olsa bile çalıştır (veya isterseniz bu bloğu silebiliriz)
         print(f"[{datetime.now(TR_TZ)}] Piyasa kapalı ({MARKET}), tarama atlanıyor.")
-        # if os.environ.get('GITHUB_EVENT_NAME') == 'workflow_dispatch': # Manuel başlattıysanız burayı açabilirim
     else:
         print(f"[{datetime.now(TR_TZ)}] Durum: {status}. {MARKET} taraması başlatılıyor...")
         symbols = DEFAULT_BIST_HISSELER if MARKET == "BIST" else DEFAULT_NASDAQ_HISSELER
@@ -121,12 +180,18 @@ if __name__ == "__main__":
         try:
             df, errs = run_scan(symbols, MARKET, "Gunluk", delay_ms=500, workers=5, gui=False)
             message = format_telegram_message(MARKET, df, status)
+            
+            # Yapay Zeka Yorumu Ekle
+            if not df.empty:
+                ai_comment = get_ai_commentary(MARKET, df)
+                if ai_comment:
+                    message += f"\n\n\U0001f9e0 *YAPAY ZEKA YORUMU:*\n{ai_comment}"
+            
             send_msg(message)
-            print(f"[{datetime.now(TR_TZ)}] İşlem Başarıyla Tamamlandı. Mesaj Gönderildi!")
-            # Arka plandaki WebSocket vb. süreçleri kesin olarak sonlandırmak için:
+            print(f"[{datetime.now(TR_TZ)}] \u0130\u015flem Ba\u015far\u0131yla Tamamland\u0131. Mesaj G\u00f6nderildi!")
             os._exit(0)
         except Exception as e:
-            error_msg = f"🔴 GİTHUB ACTION TARAMA HATASI ({MARKET}): {str(e)}"
+            error_msg = f"\U0001f534 G\u0130THUB ACTION TARAMA HATASI ({MARKET}): {str(e)}"
             print(error_msg)
             send_msg(error_msg)
             os._exit(1)
