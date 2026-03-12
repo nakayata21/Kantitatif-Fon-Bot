@@ -76,6 +76,7 @@ def format_telegram_message(market, df_res, status):
     msg = f"🚀 *{market} OTOMATİK TARAMA RAPORU*\n"
     msg += f"🗓 Tarih: {datetime.now(TR_TZ).strftime('%Y-%m-%d %H:%M:%S')}\n"
     msg += f"⏱ Durum: {status_text}\n\n"
+    msg += f"⭐ *EN İYİ 5 HİSSE (Kalite Sıralaması):*\n\n"
     
     for idx, row in top_buys.iterrows():
         ai_tahmin = row.get('AI Tahmin', '-')
@@ -85,7 +86,6 @@ def format_telegram_message(market, df_res, status):
         vol_spike = row.get('Hacim Spike', 0.0)
         dip_skor = row.get('Dip Skor', 0.0)
         
-        # Dipten Hacim Patlaması Durumu
         vol_info = f"📊 Hacim: x{vol_spike}"
         if vol_spike >= 2.0 and dip_skor >= 70:
             vol_info = f"🔥 *DİPTEN HACIM PATLAMASI (x{vol_spike})*"
@@ -106,6 +106,31 @@ def format_telegram_message(market, df_res, status):
             msg += f"   ➤ Sinyal: {' | '.join(teknik)}\n"
         
         msg += f"   ➤ R/R Oranı: {row['R/R']}\n\n"
+    
+    # === DİPTEN HACİM PATLAMASI YAPAN HİSSELER ===
+    # Tüm taranmış hisseler arasından (sadece AL sinyali olanlar değil) hacim patlaması yapanları bul
+    dip_hacim = df_res[
+        (df_res["Hacim Spike"] >= 2.0)
+    ].sort_values(by=["Dip Skor", "Hacim Spike"], ascending=[False, False]).head(5)
+    
+    # Zaten yukarıda gösterilenleri çıkar
+    top_hisseler = set(top_buys["Hisse"].tolist())
+    dip_hacim_yeni = dip_hacim[~dip_hacim["Hisse"].isin(top_hisseler)]
+    
+    if not dip_hacim_yeni.empty:
+        msg += f"💥 *DİPTEN HACİM PATLAMASI YAPANLAR:*\n\n"
+        for idx, row in dip_hacim_yeni.iterrows():
+            dip_s = row.get('Dip Skor', 0)
+            vol_s = row.get('Hacim Spike', 0)
+            sinyal = row.get('Sinyal', '-')
+            kalite = row.get('Kalite', 0)
+            
+            durum = "🔥 DİP+HACİM" if dip_s >= 70 else "💥 HACİM"
+            
+            msg += f"📌 *{row['Hisse']}* ({durum})\n"
+            msg += f"   ➤ Hacim: *x{vol_s}* | Dip Skor: *{dip_s}*\n"
+            msg += f"   ➤ Sinyal: {sinyal} | Kalite: {kalite}\n\n"
+    
     return msg
 
 def get_ai_commentary(market, df_res):
