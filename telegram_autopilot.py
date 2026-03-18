@@ -6,15 +6,22 @@ import os
 import threading
 
 # Ana modelden gerekli verileri al
-from streamlit_app import (
-    run_scan, DEFAULT_BIST_HISSELER, DEFAULT_NASDAQ_HISSELER,
-    fetch_hist, add_indicators, score_symbol, calculate_price_targets,
-    TIMEFRAME_OPTIONS, _safe_get, interval_obj
-)
+from streamlit_app import run_scan
+from constants import DEFAULT_BIST_HISSELER, DEFAULT_NASDAQ_HISSELER, DEFAULT_CRYPTO_SYMBOLS, TIMEFRAME_OPTIONS
+from indicators import add_indicators, calculate_price_targets
+from scoring import score_symbol
+from data_fetcher import fetch_hist, interval_obj
+from utils import _safe_get
 
 TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
 ALLOWED_CHAT_IDS = [os.environ.get("TELEGRAM_CHAT_ID", "1070470722")]
 DATA_FILE = "latest_scan_results.json"
+
+# GitHub Action Tetikleme Ayarları
+GITHUB_TOKEN = os.environ.get("GITHUB_TOKEN") # Manuel tetikleme için GITHUB_TOKEN (Personal Access Token) gerekli
+REPO_OWNER = "nakayata21"
+REPO_NAME = "Kantitatif-Fon-Bot"
+WORKFLOW_ID = "daily_screener.yml" 
 
 def send_msg(chat_id, text, reply_markup=None):
     url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
@@ -25,6 +32,24 @@ def send_msg(chat_id, text, reply_markup=None):
         requests.post(url, data=payload, timeout=10)
     except:
         pass
+
+def set_bot_commands():
+    """Telegram sol alt menü butonuna (Bot Commands) komutları ekler."""
+    url = f"https://api.telegram.org/bot{TOKEN}/setMyCommands"
+    commands = [
+        {"command": "menu", "description": "Ana Menüyü Göster"},
+        {"command": "bist", "description": "Son BIST Taramasını Getir"},
+        {"command": "nasdaq", "description": "Son NASDAQ Taramasını Getir"},
+        {"command": "crypto", "description": "Son CRYPTO Taramasını Getir"},
+        {"command": "tara_bist", "description": "Canlı BIST Taraması Başlat"},
+        {"command": "tara_crypto", "description": "Canlı CRYPTO Taraması Başlat"},
+        {"command": "github", "description": "GitHub Bulut Taraması Tetikle"}
+    ]
+    try:
+        requests.post(url, json={"commands": commands}, timeout=10)
+        print("✅ Telegram Menü Komutları Tanımlandı.")
+    except Exception as e:
+        print(f"❌ Menü Komutları Tanımlanamadı: {e}")
 
 def send_menu(chat_id):
     menu_text = """👋 *Merhaba! Ben VIP Asistanın TradeFatBot.*
@@ -37,16 +62,47 @@ def send_menu(chat_id):
     keyboard = {
         "inline_keyboard": [
             [
-                {"text": "💾 Son BIST Kaydı", "callback_data": "cmd_bist"}, 
-                {"text": "💾 Son NASDAQ Kaydı", "callback_data": "cmd_nasdaq"}
+                {"text": "💾 BIST Sonuçları", "callback_data": "cmd_bist"}, 
+                {"text": "💾 NASDAQ Sonuçları", "callback_data": "cmd_nasdaq"},
+                {"text": "💾 CRYPTO Sonuçları", "callback_data": "cmd_crypto"}
             ],
             [
-                {"text": "🔥 BIST'i Canlı Tara", "callback_data": "cmd_tara_bist"}, 
-                {"text": "🔥 NASDAQ'ı Canlı Tara", "callback_data": "cmd_tara_nasdaq"}
+                {"text": "🔥 BIST Tara", "callback_data": "cmd_tara_bist"}, 
+                {"text": "🔥 NASDAQ Tara", "callback_data": "cmd_tara_nasdaq"},
+                {"text": "🔥 CRYPTO Tara", "callback_data": "cmd_tara_crypto"}
+            ],
+            [
+                {"text": "🚀 GitHub Taramasını Başlat", "callback_data": "cmd_github_action"}
             ]
         ]
     }
     send_msg(chat_id, menu_text, reply_markup=keyboard)
+
+
+def trigger_github_action(chat_id):
+    """GitHub Action workflow'unu manuel tetikler."""
+    if not GITHUB_TOKEN:
+        send_msg(chat_id, "❌ *GITHUB_TOKEN* bulunamadı. Lütfen çevre değişkenlerine ekleyin.")
+        return
+    
+    url = f"https://api.telegram.org/bot{TOKEN}/sendChatAction"
+    requests.post(url, data={"chat_id": chat_id, "action": "typing"})
+    
+    dispatch_url = f"https://api.github.com/repos/{REPO_OWNER}/{REPO_NAME}/actions/workflows/{WORKFLOW_ID}/dispatches"
+    headers = {
+        "Authorization": f"token {GITHUB_TOKEN}",
+        "Accept": "application/vnd.github.v3+json"
+    }
+    payload = {"ref": "main"} # veya workflow'un bulunduğu branch
+    
+    try:
+        response = requests.post(dispatch_url, headers=headers, json=payload, timeout=10)
+        if response.status_code == 204:
+            send_msg(chat_id, "🚀 *GitHub Action başarıyla tetiklendi!* Tarama sonuçları birazdan Telegram'a düşecektir.")
+        else:
+            send_msg(chat_id, f"❌ *GitHub Hatası:* {response.status_code}\n{response.text}")
+    except Exception as e:
+        send_msg(chat_id, f"❌ *Bağlantı Hatası:* {str(e)}")
 
 
 def analyze_single_stock(chat_id, symbol):
@@ -58,6 +114,8 @@ def analyze_single_stock(chat_id, symbol):
         market = "BIST"
     elif symbol in DEFAULT_NASDAQ_HISSELER:
         market = "NASDAQ"
+    elif symbol in DEFAULT_CRYPTO_SYMBOLS:
+        market = "CRYPTO"
     else:
         market = "BIST"  # Varsayılan
     
@@ -68,8 +126,10 @@ def analyze_single_stock(chat_id, symbol):
         tv = TvDatafeed()
         tf = TIMEFRAME_OPTIONS["Gunluk"]
         
-        base_raw = fetch_hist(tv, symbol, market, interval_obj(tf["base"]), tf["bars"], retries=3)
-        conf_raw = fetch_hist(tv, symbol, market, interval_obj(tf["confirm"]), tf["confirm_bars"], retries=3)
+        tv_exchange = "BINANCE" if market == "CRYPTO" else market
+        
+        base_raw = fetch_hist(tv, symbol, tv_exchange, interval_obj(tf["base"]), tf["bars"], retries=3)
+        conf_raw = fetch_hist(tv, symbol, tv_exchange, interval_obj(tf["confirm"]), tf["confirm_bars"], retries=3)
         
         if base_raw is None or base_raw.empty:
             send_msg(chat_id, f"❌ *{symbol}* için veri bulunamadı. Sembol adını kontrol edin.")
@@ -171,18 +231,18 @@ def analyze_single_stock(chat_id, symbol):
                 from openai import OpenAI
                 client = OpenAI(base_url="https://openrouter.ai/api/v1", api_key=openrouter_key)
                 
-                ai_prompt = f"""{symbol} ({market}) hissesinin teknik analiz verileri:
-Fiyat: {close}, RSI: {rsi}, ADX: {adx}, MACD: {macd}, Hacim Spike: x{vol_spike}
-Sinyal: {s['Sinyal']}, Aksiyon: {s['Aksiyon']}, Kalite: {s['Kalite']}
-Trend: {s['Trend Skor']}, Dip: {s['Dip Skor']}, Risk: {s['Dusus Riski']}
+                ai_prompt = f"""{symbol} ({market}) hissesinin teknik verileri:
+Fiyat: {close}, Günlük Değişim: {s.get('Günlük %', '-')}, Sinyal: {s['Sinyal']}, Aksiyon: {s['Aksiyon']}
+Skor: {s['Kalite']}/100, Risk Seviyesi: {s['Dusus Riski']}
 
-Bu verilere göre bu hisse hakkında 3-4 cümlelik sade ve anlaşılır Türkçe bir yorum yap. 
-Alınır mı alınmaz mı net söyle. Risk seviyesini belirt. Emoji kullan."""
+Bu verileri teknik terim kullanmadan (RSI, MACD, ADX demeden), sanki borsa ile hiç ilgilenmemiş birine durumu özetler gibi 2-3 kısa cümlede anlat. 
+Hissenin durumu iyi mi kötü mü, şu an almak mantıklı mı yoksa tehlikeli mi net söyle. 
+Mahalle bakkalının anlayacağı kadar sade ve samimi bir dil kullan. Bol emoji ekle."""
 
                 response = client.chat.completions.create(
                     model="nvidia/nemotron-3-super-120b-a12b:free",
                     messages=[
-                        {"role": "system", "content": "Sen deneyimli bir Türk borsa analisti ve yatırım danışmanısın. Sade ve anlaşılır Türkçe konuşursun."},
+                        {"role": "system", "content": "Sen borsa verilerini halkın diliyle anlatan, samimi ve dürüst bir Türk yatırım danışmanısın. Teknik detaylara boğulmadan doğrudan sonuca odaklanırsın."},
                         {"role": "user", "content": ai_prompt}
                     ],
                     max_tokens=500,
@@ -200,35 +260,57 @@ Alınır mı alınmaz mı net söyle. Risk seviyesini belirt. Emoji kullan."""
 
 
 def format_telegram_message(market, df_res):
-    if df_res.empty: return f"❌ {market} piyasasında AL sinyali bulunamadı."
+    if df_res.empty: return f"❌ {market} piyasasında fırsat bulunamadı."
     buy_signals = df_res[df_res["Sinyal"] == "AL"]
-    if buy_signals.empty: return f"❌ {market} piyasasında AL sinyali bulunamadı."
+    if buy_signals.empty: return f"❌ {market} piyasasında onaylı işlem setup'ı oluşmadı."
     
     top_buys = buy_signals.sort_values(by="Kalite", ascending=False).head(5)
-    msg = f"🚀 *{market} {datetime.now().strftime('%H:%M')} OTOMATİK TARAMA*\n\n"
+    msg = f"🛰️ *{market} QUANT DECISION ENGINE* ({datetime.now().strftime('%H:%M')})\n\n"
+    
     for idx, row in top_buys.iterrows():
-        ai_tahmin = row.get('AI Tahmin', '-')
-        vol_spike = row.get('Hacim Spike', 0.0)
-        dip_skor = row.get('Dip Skor', 0.0)
+        engine = row.get('Engine', 'SAFE')
+        decision = row.get('Decision', 'NO TRADE')
         
-        vol_info = f"📊 Hacim: x{vol_spike}"
-        if vol_spike >= 2.0 and dip_skor >= 70:
-            vol_info = f"🔥 *DİPTEN HACIM PATLAMASI (x{vol_spike})*"
-        elif vol_spike >= 2.0:
-            vol_info = f"💥 Hacim Patlaması (x{vol_spike})"
-
-        msg += f"📌 *{row['Hisse']}*\n"
-        msg += f"   ➤ Kalite: *{row['Kalite']}*\n"
-        msg += f"   ➤ Aksiyon: {row['Aksiyon']}\n"
-        msg += f"   ➤ {vol_info}\n"
-        msg += f"   ➤ R/R Oranı: {row['R/R']}\n"
-        msg += f"   ➤ AI Tahmin: {ai_tahmin}\n\n"
+        # Engine Label
+        if engine == "OPPORTUNITY": 
+            engine_str = "⚡ OPPORTUNITY ENGINE DETECTED"
+        else:
+            engine_str = "🛡️ SAFE ENGINE DETECTED"
+            
+        msg += f"{engine_str} | *{row['Hisse']}*\n"
+        msg += f"━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+        msg += f"🎯 *Decision:* {decision}\n"
+        msg += f"📊 *Setup Puanı:* {row.get('Skor', 0)}/100 | *Trade Puanı:* {row.get('Kalite', 0)}/100\n"
+        msg += f"🔥 *Setup Stratejisi:* {row.get('Aksiyon', '-')}\n\n"
+        
+        # Ek Metrikler
+        msg += f"📈 *Gerekçe/Metrikler:*\n"
+        vol_s = row.get('Hacim Spike', 0.0)
+        msg += f"   ➤ Hacim Gücü: x{vol_s} {'🔥 Patlama' if vol_s >= 2 else ''}\n"
+        msg += f"   ➤ Ozel Durumlar: {row.get('Özel Durum', '-')}\n"
+        msg += f"   ➤ Likidite Eşiği: {row.get('Likidite', 'Geçti')}\n\n"
+        
+        # Trade Decision (Fiyatlar ve Risk) 
+        msg += f"💼 *TRADE PLANI (R/R: 1:{row.get('R/R', 0)})*\n"
+        msg += f"   ➤ Giriş: {row.get('Fiyat', 0)}\n"
+        msg += f"   ➤ Stop Loss: {row.get('Stop Loss', 0)} (%{row.get('Stop %', 0)})\n"
+        
+        tp1, tp2, tp3 = row.get('Hedef 1', 0), row.get('Hedef 2', 0), row.get('Hedef 3', 0)
+        if tp1 > 0:
+            msg += f"   ➤ TP 1 (%50 Çıkış): {tp1} (+%{row.get('Hedef 1 %', 0)})\n"
+            msg += f"   ➤ TP 2: {tp2} (+%{row.get('Hedef 2 %', 0)})\n"
+            msg += f"   ➤ TP 3 (Runner): {tp3} (+%{row.get('Hedef 3 %', 0)})\n"
+            
+        msg += "\n"
+        
     return msg
 
 
 def perform_scan(market):
     print(f"[{datetime.now()}] {market} Taraması Başladı...")
-    symbols = DEFAULT_BIST_HISSELER if market == "BIST" else DEFAULT_NASDAQ_HISSELER
+    if market == "BIST": symbols = DEFAULT_BIST_HISSELER
+    elif market == "NASDAQ": symbols = DEFAULT_NASDAQ_HISSELER
+    else: symbols = DEFAULT_CRYPTO_SYMBOLS
     
     df, errs = run_scan(symbols, market, "Gunluk", delay_ms=500, workers=5, gui=False)
     
@@ -257,12 +339,18 @@ def schedule_loop():
     """Belirli saatler gelince otomatik tarama yapan döngü"""
     while True:
         now = datetime.now()
-        if now.hour == 17 and now.minute == 30:
+        
+        # Kullanıcı talebi: BIST taraması saat 23:00 dolaylarında olsun (Kapanış sonrası net veriler)
+        if now.hour == 23 and now.minute == 0:
             perform_scan("BIST")
             time.sleep(60)
             
-        if now.hour == 17 and now.minute == 45:
+        if now.hour == 23 and now.minute == 30:
             perform_scan("NASDAQ")
+            time.sleep(60)
+
+        if now.hour == 23 and now.minute == 45:
+            perform_scan("CRYPTO")
             time.sleep(60)
             
         time.sleep(30)
@@ -298,7 +386,7 @@ def polling_loop():
                         except:
                             pass
                         
-                        if callback_data == "cmd_bist" or callback_data == "cmd_nasdaq":
+                        if callback_data in ["cmd_bist", "cmd_nasdaq", "cmd_crypto"]:
                             market = callback_data.replace("cmd_", "").upper()
                             if not os.path.exists(DATA_FILE):
                                 send_msg(chat_id, f"⚠️ *{market}* için henüz kaydedilmiş bir tarama sonucu yok.")
@@ -318,37 +406,79 @@ def polling_loop():
                         elif callback_data == "cmd_tara_nasdaq":
                             send_msg(chat_id, "⏳ *NASDAQ* taraması başlatılıyor...")
                             threading.Thread(target=perform_scan, args=("NASDAQ",), daemon=True).start()
+                            
+                        elif callback_data == "cmd_tara_crypto":
+                            send_msg(chat_id, "⏳ *CRYPTO* taraması başlatılıyor...")
+                            threading.Thread(target=perform_scan, args=("CRYPTO",), daemon=True).start()
+                            
+                        elif callback_data == "cmd_github_action":
+                            trigger_github_action(chat_id)
 
-                    # Normal mesaj geldiyse
-                    elif "message" in item:
-                        msg = item["message"]
-                        chat_id = str(msg.get("chat", {}).get("id", ""))
-                        text = msg.get("text", "").strip()
-                        
-                        if chat_id not in ALLOWED_CHAT_IDS:
-                            continue
-                        
-                        # Hisse sembolü mü kontrol et
-                        text_upper = text.upper().replace("/", "").replace("$", "")
-                        
-                        if text_upper in all_symbols or (len(text_upper) >= 2 and len(text_upper) <= 6 and text_upper.isalpha()):
-                            # Hisse sembolü girilmiş, analiz et
-                            threading.Thread(
-                                target=analyze_single_stock, 
-                                args=(chat_id, text_upper), 
-                                daemon=True
-                            ).start()
-                        elif text.startswith("/start") or text.startswith("/menu"):
-                            send_menu(chat_id)
-                        else:
-                            send_menu(chat_id)
+                        # Normal mesaj geldiyse
+                        elif "message" in item:
+                            msg = item["message"]
+                            chat_id = str(msg.get("chat", {}).get("id", ""))
+                            text = msg.get("text", "").strip().lower()
+                            
+                            if chat_id not in ALLOWED_CHAT_IDS:
+                                continue
+                            
+                            # Komut mu yoksa Hisse mi kontrol et
+                            if text == "/start" or text == "/menu":
+                                send_menu(chat_id)
+                            elif text == "/bist":
+                                # Callback logic for cmd_bist
+                                perform_saved_check(chat_id, "BIST")
+                            elif text == "/nasdaq":
+                                perform_saved_check(chat_id, "NASDAQ")
+                            elif text == "/crypto":
+                                perform_saved_check(chat_id, "CRYPTO")
+                            elif text == "/tara_bist":
+                                send_msg(chat_id, "⏳ *BIST* taraması başlatılıyor (1-2 dk)...")
+                                threading.Thread(target=perform_scan, args=("BIST",), daemon=True).start()
+                            elif text == "/tara_crypto":
+                                send_msg(chat_id, "⏳ *CRYPTO* taraması başlatılıyor...")
+                                threading.Thread(target=perform_scan, args=("CRYPTO",), daemon=True).start()
+                            elif text == "/github":
+                                trigger_github_action(chat_id)
+                            else:
+                                # Hisse sembolü mü kontrol et (eski logic)
+                                text_upper = text.upper().replace("/", "").replace("$", "")
+                                
+                                all_symbols = set(DEFAULT_BIST_HISSELER + DEFAULT_NASDAQ_HISSELER + DEFAULT_CRYPTO_SYMBOLS)
+                                
+                                if text_upper in all_symbols or (len(text_upper) >= 2 and len(text_upper) <= 10 and text_upper.isalpha()):
+                                    threading.Thread(
+                                        target=analyze_single_stock, 
+                                        args=(chat_id, text_upper), 
+                                        daemon=True
+                                    ).start()
+                                else:
+                                    send_menu(chat_id)
                         
         except Exception as e:
             time.sleep(5)
 
 
+def perform_saved_check(chat_id, market):
+    """Kayıtlı tarama dosyasından sonucu okuyup gönderir."""
+    if not os.path.exists(DATA_FILE):
+        send_msg(chat_id, f"⚠️ *{market}* için henüz kaydedilmiş bir tarama sonucu yok.")
+        return
+    try:
+        with open(DATA_FILE, "r") as f:
+            saved = json.load(f)
+        
+        ans = saved.get(market, f"❌ *{market}* için önbellekte henüz sonuç yok.")
+        ans_time = saved.get(market + "_time", "")
+        if ans_time: ans += f"\n_Son Güncelleme: {ans_time}_"
+        send_msg(chat_id, ans)
+    except Exception as e:
+        send_msg(chat_id, f"❌ Dosya okuma hatası: {e}")
+
 if __name__ == '__main__':
     print("🤖 VIP Telegram Autopilot Robotu Başlatıldı ve Dinlemede!")
+    set_bot_commands()
     t1 = threading.Thread(target=schedule_loop, daemon=True)
     t2 = threading.Thread(target=polling_loop, daemon=True)
     

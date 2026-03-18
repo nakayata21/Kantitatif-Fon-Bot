@@ -1,3 +1,15 @@
 streamlit>=1.37,<2
 pandas==2.2.3
+numpy
+yfinance
+requests
+isyatirimhisse
+ta
+vectorbt
+numba
+scikit-learn
+plotly
 git+https://github.com/rongardF/tvdatafeed.git
+selenium
+webdriver-manager
+pytesseract

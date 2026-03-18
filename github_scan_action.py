@@ -1,5 +1,6 @@
 import os
-from streamlit_app import run_scan, DEFAULT_BIST_HISSELER, DEFAULT_NASDAQ_HISSELER
+from streamlit_app import run_scan
+from constants import DEFAULT_BIST_HISSELER, DEFAULT_NASDAQ_HISSELER
 import requests
 from datetime import datetime
 import pytz
@@ -64,91 +65,53 @@ def send_msg(text):
         print(f"❌ Telegram Bağlantı Hatası: {str(e)}")
 
 def format_telegram_message(market, df_res, status):
-    if df_res.empty: return f"❌ {market} piyasasında AL sinyali bulunamadı."
+    if df_res.empty: return f"❌ {market} piyasasında fırsat bulunamadı."
     buy_signals = df_res[df_res["Sinyal"] == "AL"]
-    if buy_signals.empty: return f"❌ {market} piyasasında AL sinyali bulunamadı."
+    if buy_signals.empty: return f"❌ {market} piyasasında onaylı işlem setup'ı oluşmadı."
     
     # En iyi 5
     top_buys = buy_signals.sort_values(by="Kalite", ascending=False).head(5)
+    status_text = "🟢 Piyasa Açık (Canlı)" if status == "OPEN" else "🕒 Piyasa Kapalı/Açılmak Üzere"
     
-    status_text = "🟢 Piyasa Açık (Canlı)" if status == "OPEN" else "🕒 Piyasa Açılmak Üzere (Ön Hazırlık)"
-    
-    msg = f"🚀 *{market} OTOMATİK TARAMA RAPORU*\n"
-    msg += f"🗓 Tarih: {datetime.now(TR_TZ).strftime('%Y-%m-%d %H:%M:%S')}\n"
+    msg = f"🛰️ *{market} QUANT DECISION ENGINE* ({datetime.now(TR_TZ).strftime('%H:%M')})\n"
     msg += f"⏱ Durum: {status_text}\n\n"
-    msg += f"⭐ *EN İYİ 5 HİSSE (Kalite Sıralaması):*\n\n"
     
     for idx, row in top_buys.iterrows():
-        ai_tahmin = row.get('AI Tahmin', '-')
-        ozel_durum = row.get('Özel Durum', '-')
-        squeeze = row.get('Daralma (Squeeze)', '-')
-        bollinger = row.get('Bollinger', '-')
-        vol_spike = row.get('Hacim Spike', 0.0)
-        dip_skor = row.get('Dip Skor', 0.0)
+        engine = row.get('Engine', 'SAFE')
+        decision = row.get('Decision', 'NO TRADE')
         
-        vol_info = f"📊 Hacim: x{vol_spike}"
-        if vol_spike >= 2.0 and dip_skor >= 70:
-            vol_info = f"🔥 *DİPTEN HACIM PATLAMASI (x{vol_spike})*"
-        elif vol_spike >= 2.0:
-            vol_info = f"💥 Hacim Patlaması (x{vol_spike})"
-
-        msg += f"📌 *{row['Hisse']}*\n"
-        msg += f"   ➤ Kalite: *{row['Kalite']}* | AI: *{ai_tahmin}*\n"
-        msg += f"   ➤ Aksiyon: {row['Aksiyon']}\n"
-        msg += f"   ➤ {vol_info}\n"
-        
-        teknik = []
-        if ozel_durum != "-": teknik.append(ozel_durum)
-        if squeeze != "-": teknik.append(squeeze)
-        if bollinger != "-": teknik.append(bollinger)
-        
-        if teknik:
-            msg += f"   ➤ Sinyal: {' | '.join(teknik)}\n"
-        
-        # Hedef Fiyatlar
-        fiyat = row.get('Fiyat', 0)
-        h1 = row.get('Hedef 1', 0)
-        h1_pct = row.get('Hedef 1 %', 0)
-        h2 = row.get('Hedef 2', 0)
-        h2_pct = row.get('Hedef 2 %', 0)
-        h3 = row.get('Hedef 3', 0)
-        h3_pct = row.get('Hedef 3 %', 0)
-        stop = row.get('Stop Loss', 0)
-        stop_pct = row.get('Stop %', 0)
-        
-        if h1 and h1 > 0:
-            msg += f"   🎯 *HEDEF FİYATLAR:*\n"
-            msg += f"      1️⃣ {h1} (+%{h1_pct})\n"
-            msg += f"      2️⃣ {h2} (+%{h2_pct})\n"
-            msg += f"      3️⃣ {h3} (+%{h3_pct})\n"
-            msg += f"      🛑 Stop: {stop} ({stop_pct}%)\n"
-        
-        msg += f"\n"
-    
-    # === DİPTEN HACİM PATLAMASI YAPAN HİSSELER ===
-    # Tüm taranmış hisseler arasından (sadece AL sinyali olanlar değil) hacim patlaması yapanları bul
-    dip_hacim = df_res[
-        (df_res["Hacim Spike"] >= 2.0)
-    ].sort_values(by=["Dip Skor", "Hacim Spike"], ascending=[False, False]).head(5)
-    
-    # Zaten yukarıda gösterilenleri çıkar
-    top_hisseler = set(top_buys["Hisse"].tolist())
-    dip_hacim_yeni = dip_hacim[~dip_hacim["Hisse"].isin(top_hisseler)]
-    
-    if not dip_hacim_yeni.empty:
-        msg += f"💥 *DİPTEN HACİM PATLAMASI YAPANLAR:*\n\n"
-        for idx, row in dip_hacim_yeni.iterrows():
-            dip_s = row.get('Dip Skor', 0)
-            vol_s = row.get('Hacim Spike', 0)
-            sinyal = row.get('Sinyal', '-')
-            kalite = row.get('Kalite', 0)
+        # Engine Label
+        if engine == "OPPORTUNITY": 
+            engine_str = "⚡ OPPORTUNITY ENGINE DETECTED"
+        else:
+            engine_str = "🛡️ SAFE ENGINE DETECTED"
             
-            durum = "🔥 DİP+HACİM" if dip_s >= 70 else "💥 HACİM"
+        msg += f"{engine_str} | *{row['Hisse']}*\n"
+        msg += f"━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+        msg += f"🎯 *Decision:* {decision}\n"
+        msg += f"📊 *Setup Puanı:* {row.get('Skor', 0)}/100 | *Trade Puanı:* {row.get('Kalite', 0)}/100\n"
+        msg += f"🔥 *Setup Stratejisi:* {row.get('Aksiyon', '-')}\n\n"
+        
+        # Ek Metrikler
+        msg += f"📈 *Gerekçe/Metrikler:*\n"
+        vol_s = row.get('Hacim Spike', 0.0)
+        msg += f"   ➤ Hacim Gücü: x{vol_s} {'🔥 Patlama' if vol_s >= 2 else ''}\n"
+        msg += f"   ➤ Ozel Durumlar: {row.get('Özel Durum', '-')}\n"
+        msg += f"   ➤ Likidite Eşiği: {row.get('Likidite', 'Geçti')}\n\n"
+        
+        # Trade Decision (Fiyatlar ve Risk) 
+        msg += f"💼 *TRADE PLANI (R/R: 1:{row.get('R/R', 0)})*\n"
+        msg += f"   ➤ Giriş: {row.get('Fiyat', 0)}\n"
+        msg += f"   ➤ Stop Loss: {row.get('Stop Loss', 0)} (%{row.get('Stop %', 0)})\n"
+        
+        tp1, tp2, tp3 = row.get('Hedef 1', 0), row.get('Hedef 2', 0), row.get('Hedef 3', 0)
+        if tp1 > 0:
+            msg += f"   ➤ TP 1 (%50 Çıkış): {tp1} (+%{row.get('Hedef 1 %', 0)})\n"
+            msg += f"   ➤ TP 2: {tp2} (+%{row.get('Hedef 2 %', 0)})\n"
+            msg += f"   ➤ TP 3 (Runner): {tp3} (+%{row.get('Hedef 3 %', 0)})\n"
             
-            msg += f"📌 *{row['Hisse']}* ({durum})\n"
-            msg += f"   ➤ Hacim: *x{vol_s}* | Dip Skor: *{dip_s}*\n"
-            msg += f"   ➤ Sinyal: {sinyal} | Kalite: {kalite}\n\n"
-    
+        msg += "\n"
+        
     return msg
 
 def get_ai_commentary(market, df_res):
@@ -175,21 +138,12 @@ def get_ai_commentary(market, df_res):
         stock_data += f"  AI Tahmin: {row.get('AI Tahmin', '-')}\n"
         stock_data += f"  Özel Durum: {row.get('Özel Durum', '-')}\n\n"
     
-    prompt = f"""Aşağıda {market} piyasasından algoritmik tarama ile bulunan en iyi 5 hissenin teknik analiz verileri var.
-
-Tarama Verileri:
+    prompt = f"""Aşağıda {market} piyasasından taranan en iyi 5 hissenin verileri var:
 {stock_data}
 
-Görevin:
-1. Her hisse için ayrı ayrı 2-3 cümlelik sade Türkçe yorum yaz.
-2. Teknik analiz terimlerini kullan ama bir borsa yeni başlayanı bile anlayabilsin.
-3. RSI, Hacim, MACD gibi verileri yorumla: "Bu ne anlama geliyor?" sorusuna cevap ver.
-4. Hissenin risk seviyesini belirt (düşük/orta/yüksek).
-5. "Alınır mı alınmaz mı?" sorusuna net bir görüş bildir.
-6. Her hissenin başına uygun emoji koy (📈 yükseliş, ⚠️ dikkat, 🔥 güçlü sinyal gibi).
-7. En sona 1-2 cümlelik genel bir piyasa değerlendirmesi ekle.
-
-Önemli: Yatırım tavsiyesi olmadığını belirtme. Doğrudan analiz yap. Sade ve anlaşılır Türkçe kullan."""
+Bu verileri teknik terim kullanmadan, sanki borsa ile hiç ilgilenmemiş birine durumu özetler gibi her hisse için 1 kısa cümlede anlat. 
+Hissenin durumu iyi mi kötü mü, şu an almak mantıklı mı yoksa "iş işten geçmiş" mi net söyle. 
+Mahalle bakkalının anlayacağı kadar sade ve samimi bir dil kullan. Bol emoji ekle."""
     
     try:
         from openai import OpenAI
@@ -202,7 +156,7 @@ Görevin:
         response = client.chat.completions.create(
             model="nvidia/nemotron-3-super-120b-a12b:free",
             messages=[
-                {"role": "system", "content": "Sen deneyimli bir Türk borsa analisti ve yatırım danışmanısın. Teknik analizi sade bir dille, herkesin anlayacağı şekilde açıklıyorsun. Yorum yaparken detaylı ve açıklayıcı ol. Emoji kullan. Türkçe yaz."},
+                {"role": "system", "content": "Sen borsa verilerini halkın diliyle anlatan, teknik terimlerden nefret eden, samimi ve dürüst bir Türk yatırım danışmanısın. Doğrudan sonuca odaklanırsın."},
                 {"role": "user", "content": prompt}
             ],
             max_tokens=1500,
@@ -221,14 +175,28 @@ Görevin:
 if __name__ == "__main__":
     status = get_market_status(MARKET)
     
+    # Kripto için her zaman açık diyebiliriz (Borsa tatili yoktur)
+    if MARKET == "CRYPTO":
+        status = "OPEN"
+
     if status == "CLOSED":
         print(f"[{datetime.now(TR_TZ)}] Piyasa kapalı ({MARKET}), tarama atlanıyor.")
     else:
         print(f"[{datetime.now(TR_TZ)}] Durum: {status}. {MARKET} taraması başlatılıyor...")
-        symbols = DEFAULT_BIST_HISSELER if MARKET == "BIST" else DEFAULT_NASDAQ_HISSELER
         
+        if MARKET == "BIST":
+            symbols = DEFAULT_BIST_HISSELER
+        elif MARKET == "NASDAQ":
+            symbols = DEFAULT_NASDAQ_HISSELER
+        elif MARKET == "CRYPTO":
+            from constants import DEFAULT_CRYPTO_SYMBOLS
+            symbols = DEFAULT_CRYPTO_SYMBOLS
+        else:
+            symbols = DEFAULT_BIST_HISSELER # Fallback
+            
         try:
-            df, errs = run_scan(symbols, MARKET, "Gunluk", delay_ms=500, workers=5, gui=False)
+            # run_scan'daki gui=False argümanı kaldırıldı (Otomatik algılıyor)
+            df, errs = run_scan(symbols, MARKET, "Gunluk", delay_ms=500, workers=5)
             message = format_telegram_message(MARKET, df, status)
             
             # Yapay Zeka Yorumu Ekle
@@ -238,10 +206,10 @@ if __name__ == "__main__":
                     message += f"\n\n\U0001f9e0 *YAPAY ZEKA YORUMU:*\n{ai_comment}"
             
             send_msg(message)
-            print(f"[{datetime.now(TR_TZ)}] \u0130\u015flem Ba\u015far\u0131yla Tamamland\u0131. Mesaj G\u00f6nderildi!")
+            print(f"[{datetime.now(TR_TZ)}] İşlem Başarıyla Tamamlandı. Mesaj Gönderildi!")
             os._exit(0)
         except Exception as e:
-            error_msg = f"\U0001f534 G\u0130THUB ACTION TARAMA HATASI ({MARKET}): {str(e)}"
+            error_msg = f"\U0001f534 GİTHUB ACTION TARAMA HATASI ({MARKET}): {str(e)}"
             print(error_msg)
             send_msg(error_msg)
             os._exit(1)
