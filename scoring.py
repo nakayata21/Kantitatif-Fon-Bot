@@ -510,6 +510,12 @@ def score_symbol(last: pd.Series, prev: pd.Series, conf_last: pd.Series, market:
     if w_msg: durumlar.append(w_msg)
     if is_minervini: durumlar.append("🚀 MINERVINI TREND TEMPLATE")
     
+    # UT Bot'u güçlendirme: AL veriyor + Fiyat EMA20 üstünde + RSI pozitif bölgede ise güçlü bir sinyaldir
+    is_ut_strong = ut_buy and (close_val > ema20_val) and (rsi_val > 50) and (macd_curr > -0.5)
+    if is_ut_strong: 
+        durumlar.append("🤖 GÜÇLÜ UT BOT AL")
+        kalite += 5 # Ekstra güven puanı
+    
     return {
         "Vade": vade, "Kalite": round(kalite,1), "Günlük %": f"%{round(daily_return,2)}",
         "Skor": round(general,1), "Smart Money Skor": round(smart_money,1),
@@ -524,7 +530,8 @@ def score_symbol(last: pd.Series, prev: pd.Series, conf_last: pd.Series, market:
         "OBV Durumu": "📈 Artıyor" if _safe_get(last, "obv", 0) > _safe_get(prev, "obv", 0) else "📉 Azalıyor",
         "Konsol Durumu": konsol_tag,
         "Weinstein": w_stage_tag,
-        "Trend Sablonu": "✅ GÜÇLÜ (MINERVINI)" if is_minervini else "-"
+        "Trend Sablonu": "✅ GÜÇLÜ (MINERVINI)" if is_minervini else "-",
+        "UT_Bot_Al": is_ut_strong
     }
 
 def score_weinstein(last: pd.Series, conf_last: pd.Series) -> Tuple[float, str, str]:

@@ -60,4 +60,14 @@ def format_telegram_message(market, df_res, status):
             
             msg += f"🔍 *Metrikler:* Vol: x{row.get('Hacim Spike', 0)} | {row.get('Özel Durum', '-')}\n\n"
             
+    # Güçlü UT Bot Sinyalleri
+    if "UT_Bot_Al" in df_res.columns:
+        ut_signals = df_res[df_res["UT_Bot_Al"] == True]
+        if not ut_signals.empty:
+            msg += "🤖 *GÜÇLÜ UT BOT YAKALAMALARI (Momentum + Trend Onaylı)*\n"
+            ut_stocks = ut_signals.sort_values(by="Kalite", ascending=False).head(5)
+            for _, row in ut_stocks.iterrows():
+                msg += f"👉 *{row['Hisse']}* | Puan: {row['Kalite']}/100 | Hedef 1: {row.get('Hedef 1', '-')}\n"
+            msg += "\n"
+            
     return msg
