@@ -70,6 +70,11 @@ def format_telegram_message(market, df_res, status):
             
             msg += f"🔍 *Teknik:* Vol: x{row.get('Hacim Spike', 0)} | {row.get('Özel Durum', '-')}\n"
             
+            sig_p = row.get("Sinyal Fiyatı", "-")
+            if sig_p != "-":
+                msg += f"💡 *Sinyal:* {sig_p} ({row.get('Sinyal Mesafesi', '-')} Mesafe | {row.get('Sinyal Zamanı', '-')})\n"
+
+            
             # Temel Analiz Verileri (Eğer Varsa)
             pe = row.get("pe_ratio")
             pb = row.get("pb_ratio")

@@ -459,6 +459,15 @@ def score_symbol(last: pd.Series, prev: pd.Series, conf_last: pd.Series, market:
     is_exhaustion = (rsi_val > 82) and (ema20_dist > 12.0)
     if is_exhaustion: risk += 50
     if is_pump_dump: risk += 50
+    
+    # Sinyal Mesafe Cezası
+    sig_dist = float(_safe_get(last, "sig_entry_dist", 0.0))
+    sig_bars = int(_safe_get(last, "sig_entry_bars", 0))
+    if sig_dist > 6.0:
+        risk += 15
+        if sig_dist > 12.0:
+            risk += 25
+    
     risk = clamp(risk)
 
     confidence = clamp(20 + (25 if mtf_ok else 0) + (15 if regime_ok else 0) + (20 if ema20_slope > 0 else -10))
@@ -555,6 +564,17 @@ def score_symbol(last: pd.Series, prev: pd.Series, conf_last: pd.Series, market:
         durumlar.append("⛈️ MÜKEMMEL FIRTINA (Günlük+Haftalık Uyum)")
         kalite += 10
     if above_vwap: durumlar.append("🏦 VWAP ÜZERİNDE (Kurumsal Destek)")
+
+    # Sinyal Tazelik Durumu
+    sig_type = str(_safe_get(last, "sig_entry_type", "-"))
+    if sig_type != "-":
+        if sig_bars <= 1:
+            durumlar.append(f"✨ TAZE {sig_type} SİNYALİ")
+            kalite += 5
+        elif sig_dist > 8.0:
+            durumlar.append(f"⚠️ {sig_type} MESAFESİ AÇILDI (%{round(sig_dist,1)})")
+            kalite -= 10
+
 
     # UT Bot & Divergence Fusion (ULTIMATE SIGNAL)
     is_ut_strong = ut_buy and (close_val > ema20_val) and (rsi_val > 50) and (macd_curr > -0.5)

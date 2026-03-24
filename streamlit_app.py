@@ -411,6 +411,66 @@ def run_scan(symbols, exchange, tf_name, delay_ms, workers=1):
             last["has_bullish_div"] = has_bullish_div
             last["div_msg"] = div_msg
             
+            # --- SİNYAL TAKİBİ (Faz 4) ---
+            # Geriye dönük tarama yapabilmek için vb'yi kullanıyoruz
+            lookback = 15
+            recent_vb = vb.tail(lookback).copy()
+            # Divergence'ları seriye ekle (indeks bazlı)
+            recent_vb["has_div"] = False
+            for sig in div_res_data.get("signals", []):
+                idx = sig.get("current_index", -1)
+                # vb indeksleri datetime olduğu için candle listesindeki index ile eşleştirmek gerekecek
+                # vb.iloc[idx] bazen kayabilir ama candles listesi vb ile aynı uzunluktaysa güvenlidir
+                if 0 <= idx < len(vb):
+                    raw_idx = vb.index[idx]
+                    if raw_idx in recent_vb.index:
+                        if sig.get("divergence_type") in ["positive_regular", "positive_hidden"]:
+                            recent_vb.at[raw_idx, "has_div"] = True
+                            
+            # Sinyal türlerini tespit et (Ultimate, UT Bot, Div)
+            # Ultimate = Strong UT + Bullish Div
+            # UT Strong = ut_buy and (close > ema20) and (rsi > 50) and (macd > -0.5)
+            # Re-calculating temporary signals for lookback bars
+            ema20_ser = recent_vb["ema20"]
+            rsi_ser = recent_vb["rsi"]
+            macd_ser = recent_vb["macd_hist"]
+            ut_buy_ser = recent_vb["ut_buy"]
+            div_ser = recent_vb["has_div"]
+            close_ser = recent_vb["close"]
+
+            sig_price, sig_bars, sig_type = None, 0, "-"
+            
+            # Geriye doğru tara (en sonuncuyu bul)
+            for i in range(len(recent_vb)-1, -1, -1):
+                c_close = float(close_ser.iloc[i])
+                c_ut = bool(ut_buy_ser.iloc[i])
+                c_div = bool(div_ser.iloc[i])
+                c_strong = c_ut and (c_close > float(ema20_ser.iloc[i])) and (float(rsi_ser.iloc[i]) > 50) and (float(macd_ser.iloc[i]) > -0.5)
+                
+                # Sinyal Öncelik Sıralaması
+                found = False
+                if c_strong and c_div:
+                    sig_type, found = "🚀 ULTIMATE", True
+                elif c_strong:
+                    sig_type, found = "🤖 UT BOT", True
+                elif c_div:
+                    sig_type, found = "🐂 DİV", True
+                
+                if found:
+                    sig_price = c_close
+                    sig_bars = len(vb) - (len(vb) - len(recent_vb) + i) - 1
+                    break
+            
+            dist_pct = 0.0
+            if sig_price:
+                dist_pct = ((float(last["close"]) - sig_price) / sig_price) * 100
+            
+            # Sinyal bilgisini last'a ekle (score_symbol'e gidecek)
+            last["sig_entry_price"] = sig_price
+            last["sig_entry_bars"] = sig_bars
+            last["sig_entry_dist"] = dist_pct
+            last["sig_entry_type"] = sig_type
+
             s = score_symbol(last, prev, conf_last, exchange, index_healthy)
             targets = calculate_price_targets(vb)
             
@@ -424,7 +484,10 @@ def run_scan(symbols, exchange, tf_name, delay_ms, workers=1):
                    "Bollinger Genisligi": round(float(_safe_get(last, "bb_width", 0.0)), 2),
                    "Daralma (Squeeze)": "🗜 İzlenir" if bool(_safe_get(last, "bb_squeeze", False)) else "-",
                    "has_bullish_div": has_bullish_div,
-                   "div_msg": div_msg}
+                   "div_msg": div_msg,
+                   "Sinyal Fiyatı": sig_price if sig_price else "-",
+                   "Sinyal Mesafesi": f"%{round(dist_pct, 1)}" if sig_price else "-",
+                   "Sinyal Zamanı": f"{sig_bars} bar önce" if sig_price else "-"}
             if targets: res.update(targets)
             return res
         except Exception as e: return {"_err": f"{sym}: {e}"}
