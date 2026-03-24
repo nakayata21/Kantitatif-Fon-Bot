@@ -1,4 +1,5 @@
 import os
+import pandas as pd
 from streamlit_app import run_scan
 from constants import DEFAULT_BIST_HISSELER, DEFAULT_NASDAQ_HISSELER
 import requests
@@ -86,18 +87,25 @@ def get_ai_commentary(market, df_res):
         stock_data += f"Hisse: {row['Hisse']}\n"
         stock_data += f"  Kalite Skoru: {row['Kalite']}\n"
         stock_data += f"  Sinyal: {row['Sinyal']} | Aksiyon: {row['Aksiyon']}\n"
-        stock_data += f"  RSI: {row.get('RSI', '-')} | ADX: {row.get('ADX', '-')}\n"
-        stock_data += f"  Hacim Spike: x{row.get('Hacim Spike', 0)}\n"
-        stock_data += f"  R/R Oranı: {row.get('R/R', '-')}\n"
-        stock_data += f"  AI Tahmin: {row.get('AI Tahmin', '-')}\n"
-        stock_data += f"  Özel Durum: {row.get('Özel Durum', '-')}\n\n"
+        stock_data += f"  Özel Durum (Kritik): {row.get('Özel Durum', '-')}\n"
+        stock_data += f"  ULTIMATE SİNYAL: {'Evet' if row.get('UT_Plus_Div', False) else 'Hayır'}\n"
+        
+        pe_str = f"F/K: {round(float(row['pe_ratio']),1)}" if pd.notna(row.get('pe_ratio')) and str(row.get('pe_ratio')) != "nan" else ""
+        pb_str = f"PD/DD: {round(float(row['pb_ratio']),1)}" if pd.notna(row.get('pb_ratio')) and str(row.get('pb_ratio')) != "nan" else ""
+        if pe_str or pb_str:
+            stock_data += f"  Temel Veriler: {pe_str} | {pb_str} | Not: {row.get('isy_grade', '-')}\n"
+            
+        stock_data += f"  R/R Oranı: {row.get('R/R', '-')}\n\n"
     
-    prompt = f"""Aşağıda {market} piyasasından taranan {title} verileri var:
+    prompt = f"""Aşağıda {market} piyasasından filtrelenmiş algoritmik sistemin seçtiği en iyi {len(top_stocks)} hissenin teknik ve temel verileri var:
 {stock_data}
 
-Bu verileri teknik terim kullanmadan, sanki borsa ile hiç ilgilenmemiş birine durumu özetler gibi her hisse için 1 kısa cümlede anlat. 
-Hissenin durumu iyi mi kötü mü, şu an almak mantıklı mı yoksa "iş işten geçmiş" mi net söyle. 
-Mahalle bakkalının anlayacağı kadar sade ve samimi bir dil kullan. Bol emoji ekle."""
+Sen üst düzey bir Quant Analisti ve Portföy Yöneticisisin. Sana verilen teknik "Özel Durumlar" (örneğin Pozitif Uyumsuzluk veya UT Bot) ile "Temel Verileri" (F/K, PD/DD) harmanlayarak, her hisse için *1-2 cümlelik çok keskin, net ve profesyonel (ama herkesin anlayacağı kadar sade)* bir analiz yap.
+
+Kurallar:
+1. Temel analiz verisi (F/K - PD/DD) varsa ucuz/pahalı yorumu yap.
+2. Sinyal "ULTIMATE SİNYAL: Evet" ise bunun teknik açıdan çok nadir ve güçlü bir alım fırsatı olduğunu vurgula.
+3. Asla yatırım tavsiyesi veriyorum demezsin, "Sistem verilerine göre..." diye konuşursun. Hissenin riskli mi yoksa güvenli bir dönüşte mi olduğunu net belirt. Bol ilgili emoji kullan."""
     
     try:
         from openai import OpenAI
@@ -110,7 +118,7 @@ Mahalle bakkalının anlayacağı kadar sade ve samimi bir dil kullan. Bol emoji
         response = client.chat.completions.create(
             model="nvidia/nemotron-3-super-120b-a12b:free",
             messages=[
-                {"role": "system", "content": "Sen borsa verilerini halkın diliyle anlatan, teknik terimlerden nefret eden, samimi ve dürüst bir Türk yatırım danışmanısın. Doğrudan sonuca odaklanırsın."},
+                {"role": "system", "content": "Sen dünyanın en büyük hedge fonlarından birinde çalışan, soğukkanlı, disiplinli ve verilerle konuşan elit bir Türk Quant Analisti ve Portföy Yöneticisisin. Gereksiz heyecan yapmazsın, sadece matematik ve istatistikle konuşursun. Aynı zamanda yatırım terimlerini halkın anlayabileceği kadar berrak bir şekilde açıklarsın."},
                 {"role": "user", "content": prompt}
             ],
             max_tokens=1500,
