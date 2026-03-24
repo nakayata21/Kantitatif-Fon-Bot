@@ -1,0 +1,38 @@
+name: AI Self-Learning Retrain
+
+on:
+  schedule:
+    - cron: '0 0 * * 0' # Her Pazar gece yarısı (UTC)
+  workflow_dispatch:      # Manuel tetikleme için
+
+jobs:
+  retrain:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: true
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-language: '3.10'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: |
+          pip install pandas numpy scikit-learn yfinance sqlite3
+
+      - name: Run Trainer Service (Labeling + Training)
+        run: python trainer_service.py
+        env:
+          PYTHONPATH: .
+
+      - name: Commit and Push Updated Model
+        run: |
+          git config --global user.name "AI Self-Trainer"
+          git config --global user.email "ai-trainer@github.com"
+          git add signals_log.db ai_model.pkl
+          git commit -m "Auto-retrain: Updated AI model and signals database [skip ci]" || echo "No changes to commit"
+          git push

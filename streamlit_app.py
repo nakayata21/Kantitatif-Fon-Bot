@@ -17,7 +17,7 @@ from ui_components import inject_custom_css, signal_style, action_style
 from data_fetcher import (
     fetch_quick_fundamentals, fetch_yf_data, 
     fetch_hist, check_index_health, get_ai_model, interval_obj,
-    fetch_global_indices
+    fetch_global_indices, fetch_index_history
 )
 from database import init_db, save_scan_results, get_new_elite_entries
 
@@ -76,7 +76,8 @@ def init_gui():
             
         st.session_state.scan_df = pd.DataFrame()
         st.session_state.scan_errs = []
-        st.rerun()
+        st.rerun()    # --- Veritabanı İlklendirme ---
+    init_db()
 
     if "symbols_text" not in st.session_state:
         if st.session_state.piyasa == "NASDAQ":
@@ -489,6 +490,26 @@ def run_scan(symbols, exchange, tf_name, delay_ms, workers=1):
                    "Sinyal Mesafesi": f"%{round(dist_pct, 1)}" if sig_price else "-",
                    "Sinyal Zamanı": f"{sig_bars} bar önce" if sig_price else "-"}
             if targets: res.update(targets)
+            
+            # --- AI ÖĞRENME LOGLAMASI (Faz 5) ---
+            # Sadece 'AL' veya 'TRADE READY' seviyesindeki sinyalleri logla (gürültüyü azaltmak için)
+            if s.get("Sinyal") in ["AL", "DİP AL"] or res.get("UT_Plus_Div"):
+                feat_log = {
+                    "rsi": float(_safe_get(last, "rsi", 50)),
+                    "adx": float(_safe_get(last, "adx", 15)),
+                    "ema20_dist": float(_safe_get(last, "ema20_dist", 0.0)),
+                    "vol_spike": float(_safe_get(last, "vol_spike", 1.0)),
+                    "mfi": float(_safe_get(last, "mfi", 50.0)),
+                    "mansfield_rs": float(_safe_get(last, "mansfield_rs", 0.0)),
+                    "above_vwap": int(_safe_get(last, "above_vwap", 0)),
+                    "score": float(s.get("Skor", 0)),
+                    "kalite": float(s.get("Kalite", 0))
+                }
+                try:
+                    log_signal(sym, exchange, float(last["close"]), s.get("Sinyal"), feat_log)
+                except:
+                    pass
+
             return res
         except Exception as e: return {"_err": f"{sym}: {e}"}
 
