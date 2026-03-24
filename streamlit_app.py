@@ -453,8 +453,108 @@ def run_scan(symbols, exchange, tf_name, delay_ms, workers=1):
     return df, errs
 
 def render_backtest_tab():
-    st.info("Geriye dönük test mantığı burada çalışır.")
-    # ... (Backtest implementation remains similar but calls updated modules)
-
+    st.markdown("### ⏪ Geriye Dönük Algoritma Testi (Backtest)")
+    st.markdown("Bu modül, bir hissenin geçmişte çıkarttığı 'ULTIMATE REVERSAL' veya 'UT BOT AL' sinyallerinin **X gün sonra ne kadar kazandırdığını** test eder.")
+    
+    col1, col2, col3 = st.columns(3)
+    market = col1.selectbox("Piyasa Seç", ["BIST", "NASDAQ", "CRYPTO"], key="bt_market")
+    symbol = col2.text_input("Hisse/Coin Sembolü", value="THYAO").upper()
+    days_forward = col3.number_input("Test Süresi (Gün Sonrası Hedef)", min_value=1, max_value=100, value=20)
+    
+    if st.button("🚀 Testi Başlat", type="primary", use_container_width=True):
+        with st.spinner(f"{symbol} geçmiş verileri analiz ediliyor..."):
+            try:
+                from data_fetcher import fetch_hist, interval_obj
+                from indicators import TIMEFRAME_OPTIONS, add_indicators
+                
+                tf = TIMEFRAME_OPTIONS["Gunluk"]
+                exch = "BIST" if market == "BIST" else ("BINANCE" if market == "CRYPTO" else "NASDAQ")
+                
+                # 600 bar geriye gidiyoruz ki bol sinyal yakalayalım
+                raw_df = fetch_hist(st.session_state.tv, symbol, exch, interval_obj(tf["base"]), 600)
+                if raw_df is None or raw_df.empty:
+                    st.error("Veri alınamadı! Lütfen sembolü kontrol edin.")
+                    return
+                
+                df = add_indicators(raw_df)
+                
+                results = []
+                for i in range(len(df) - int(days_forward)):
+                    row = df.iloc[i]
+                    
+                    # Sinyal Kuralları (Scoring mantığı)
+                    ut_buy = row.get("ut_buy", False)
+                    ema20 = row.get("ema20", 0)
+                    rsi = row.get("rsi", 0)
+                    macd = row.get("macd", 0)
+                    has_div = row.get("has_bullish_div", False)
+                    close_val = float(row["close"])
+                    
+                    is_ut_strong = ut_buy and (close_val > ema20) and (rsi > 50) and (macd > -0.5)
+                    
+                    signal_type = None
+                    if is_ut_strong and has_div:
+                        signal_type = "🚀 ULTIMATE REVERSAL"
+                    elif is_ut_strong:
+                        signal_type = "🤖 GÜÇLÜ UT BOT"
+                    elif has_div:
+                        signal_type = "🐂 POZİTİF UYUMSUZLUK"
+                        
+                    if signal_type:
+                        future_close = float(df.iloc[i + int(days_forward)]["close"])
+                        max_future_high = float(df.iloc[i+1 : i+int(days_forward)+1]["high"].max())
+                        
+                        ret_pct = ((future_close - close_val) / close_val) * 100
+                        max_ret_pct = ((max_future_high - close_val) / close_val) * 100
+                        
+                        dt_val = df.index[i]
+                        # Handling pandas timestamp formats string conversion
+                        date_str = dt_val.strftime("%Y-%m-%d") if hasattr(dt_val, "strftime") else str(dt_val)
+                        
+                        results.append({
+                            "Tarih": date_str,
+                            "Kapanış": round(close_val, 2),
+                            "Sinyal Türü": signal_type,
+                            f"{int(days_forward)} Gün Sonra": round(future_close, 2),
+                            "Kapanış Getirisi (%)": round(ret_pct, 2),
+                            "Maksimum Potansiyel (%)": round(max_ret_pct, 2)
+                        })
+                
+                if not results:
+                    st.warning(f"Son 600 işlem gününde {symbol} için herhangi bir 'Güçlü Al' veya 'Uyumsuzluk' sinyali bulunamadı.")
+                else:
+                    res_df = pd.DataFrame(results)
+                    # NaN temizliği
+                    res_df = res_df.fillna(0)
+                    
+                    avg_ret = float(res_df["Kapanış Getirisi (%)"].mean())
+                    win_rate = float((res_df["Kapanış Getirisi (%)"] > 0).mean() * 100)
+                    max_avg = float(res_df["Maksimum Potansiyel (%)"].mean())
+                    
+                    st.success(f"Analiz Tamamlandı: Toplam {len(results)} sinyal tarihi bulundu.")
+                    
+                    m1, m2, m3, m4 = st.columns(4)
+                    m1.metric("Kazanma Oranı (Win Rate)", f"%{win_rate:.1f}")
+                    m2.metric(f"Ortalama Getiri ({int(days_forward)} Gün)", f"%{avg_ret:.1f}")
+                    m3.metric("Ortalama Potansiyel Zirve", f"%{max_avg:.1f}")
+                    m4.metric("Toplam Sinyal Sayısı", str(len(res_df)))
+                    
+                    def color_cells(val):
+                        try:
+                            v = float(val)
+                            color = '#00ff0020' if v > 0 else '#ff000020' if v < 0 else ''
+                            return f'background-color: {color}'
+                        except: return ''
+                        
+                    st.dataframe(
+                        res_df.style.map(color_cells, subset=["Kapanış Getirisi (%)", "Maksimum Potansiyel (%)"]),
+                        use_container_width=True
+                    )
+                    
+                    # Küçük bir AI Yorumu Eklentisi (opsiyonel ama şık durur)
+                    st.info(f"💡 **İpucu:** Maksimum Potansiyel, sinyal sonrası {int(days_forward)} gün içinde hissenin gördüğü en yüksek kâr marjını gösterir. İzleyen stop-loss kullansaydınız ortalama **%{max_avg:.1f}** kadar kâr kilitleyebilirdiniz.")
+                    
+            except Exception as e:
+                st.error(f"Backtest motorunda hata oluştu: {str(e)}")
 if __name__ == "__main__":
     init_gui()
