@@ -65,7 +65,7 @@ def compute_ut_bot(close: pd.Series, high: pd.Series, low: pd.Series, a: float =
     buy, sell, out_pos = _ut_bot_numba(close_arr, loss_arr)
     return pd.Series(buy, index=close.index), pd.Series(sell, index=close.index), pd.Series(out_pos, index=close.index)
 
-def add_indicators(df: pd.DataFrame) -> pd.DataFrame:
+def add_indicators(df: pd.DataFrame, index_df: pd.DataFrame = None) -> pd.DataFrame:
     out = normalize(df)
     
     out["ema20"] = ta.trend.EMAIndicator(close=out["close"], window=20, fillna=True).ema_indicator()
@@ -234,6 +234,23 @@ def add_indicators(df: pd.DataFrame) -> pd.DataFrame:
                 return 3  # Stage 3: Topping (Distribution)
                 
     out["weinstein_stage"] = out.apply(identify_weinstein_stage, axis=1)
+
+    # --- Mansfield Relative Strength (RS) ---
+    if index_df is not None and not index_df.empty:
+        try:
+            # Sadece ortak tarihleri alarak RS Hesapla
+            common_idx = out.index.intersection(index_df.index)
+            if len(common_idx) > 20:
+                rs_ratio = out.loc[common_idx, "close"] / index_df.loc[common_idx, "close"]
+                rs_sma50 = rs_ratio.rolling(50).mean()
+                out.loc[common_idx, "mansfield_rs"] = ((rs_ratio / rs_sma50) - 1) * 100
+                out["mansfield_rs"] = out["mansfield_rs"].fillna(0.0)
+            else:
+                out["mansfield_rs"] = 0.0
+        except:
+            out["mansfield_rs"] = 0.0
+    else:
+        out["mansfield_rs"] = 0.0
 
     return out
 

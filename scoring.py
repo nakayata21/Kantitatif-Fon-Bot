@@ -235,6 +235,7 @@ def score_symbol(last: pd.Series, prev: pd.Series, conf_last: pd.Series, market:
     prev_close    = float(_safe_get(prev, "close", 0.0))
     sma20_val     = float(_safe_get(last, "sma20", 0.0))
     avg_turnover  = float(_safe_get(last, "avg_turnover_20", 0.0))
+    mansfield_rs  = float(_safe_get(last, "mansfield_rs", 0.0))
     daily_return = ((close_val - prev_close) / prev_close) * 100 if prev_close > 0 else 0.0
 
     macd_cross_up  = (macd_curr > 0) and (macd_prev <= 0)
@@ -259,6 +260,11 @@ def score_symbol(last: pd.Series, prev: pd.Series, conf_last: pd.Series, market:
     trend += 12 if (sma50_val > 0 and sma200_val > 0 and sma50_val > sma200_val) else 0
     trend += 10 if (sma50_val > 0 and close_val > sma50_val) else 0
     trend += 5  if (rsi_val > 50 and rsi_val > prev_rsi) else 0
+    
+    # Göreceli Güç (Relative Strength) Bonusu
+    trend += 15 if mansfield_rs > 0.0 else 0
+    trend += 10 if mansfield_rs > 2.0 else 0
+
 
     # 2. DİP SKORU (TOPLAMA/BİRİKİM)
     support_120_val = float(_safe_get(last, "support_120", 0.0))
@@ -526,7 +532,8 @@ def score_symbol(last: pd.Series, prev: pd.Series, conf_last: pd.Series, market:
     if bb_squeeze: durumlar.append("🗜️ SIKIŞMA VAR")
     if w_msg: durumlar.append(w_msg)
     if is_minervini: durumlar.append("🚀 MINERVINI TREND TEMPLATE")
-    
+    if mansfield_rs > 0.5: durumlar.append(f"👑 ENDEKS LİDERİ (RS: {round(mansfield_rs, 1)})")
+
     # UT Bot & Divergence Fusion (ULTIMATE SIGNAL)
     is_ut_strong = ut_buy and (close_val > ema20_val) and (rsi_val > 50) and (macd_curr > -0.5)
     has_bullish_div = bool(_safe_get(last, "has_bullish_div", False))

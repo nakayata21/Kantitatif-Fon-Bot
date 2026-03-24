@@ -360,11 +360,16 @@ def render_scan_table(input_df, sort_col="Kalite"):
 def run_scan(symbols, exchange, tf_name, delay_ms, workers=1):
     from tvDatafeed import TvDatafeed
     from divergence import DivergenceEngine
+    from data_fetcher import get_cached_index_history
+    
     tv = TvDatafeed()
     div_engine = DivergenceEngine()
     tf = TIMEFRAME_OPTIONS[tf_name]
     ai_model, ai_features = get_ai_model(exchange, tf_name, _tv=tv)
     index_healthy = check_index_health(tv, exchange, tf_name)
+    
+    # Global Endeks Verisini Bir Kez Çek (Göreceli Güç - RS İçin)
+    global_index_df = get_cached_index_history(exchange, tf_name, bars=tf["bars"])
     
     tv_exchange = "BINANCE" if exchange == "CRYPTO" else exchange
     
@@ -391,7 +396,7 @@ def run_scan(symbols, exchange, tf_name, delay_ms, workers=1):
                 time.sleep((delay_ms / 1000.0) + (worker_id * 0.1))
             base_raw = fetch_hist(tv, sym, tv_exchange, interval_obj(tf["base"]), tf["bars"])
             conf_raw = fetch_hist(tv, sym, tv_exchange, interval_obj(tf["confirm"]), tf["confirm_bars"])
-            base, conf = add_indicators(base_raw), add_indicators(conf_raw)
+            base, conf = add_indicators(base_raw, index_df=global_index_df), add_indicators(conf_raw)
             vb = base.dropna(subset=["close", "rsi", "adx"])
             vc = conf.dropna(subset=["close", "macd_hist"])
             if vb.empty or vc.empty: return {"_err": f"{sym}: Veri yok"}

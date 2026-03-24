@@ -389,6 +389,27 @@ def check_index_health(tv, exchange: str, tf_name: str) -> bool:
         return is_healthy
     except: return True
 
+@st.cache_data(ttl=3600*12, show_spinner=False)
+def get_cached_index_history(exchange: str, tf_name: str, bars: int = 300) -> pd.DataFrame:
+    """Endeks verisini bir kez çeker ve önbelleğe alır (Göreceli Güç/RS hesaplaması için)."""
+    try:
+        from tvDatafeed import TvDatafeed
+        tv = TvDatafeed()
+        tf = TIMEFRAME_OPTIONS[tf_name]
+        
+        if exchange == "CRYPTO":
+            index_sym, exch_name = "BTCUSDT", "BINANCE"
+        else:
+            index_sym = "QQQ" if exchange == "NASDAQ" else "XU100"
+            exch_name = "BIST" if exchange == "BIST" else exchange
+            
+        index_raw = fetch_hist(tv, index_sym, exch_name, interval_obj(tf["base"]), bars, retries=2)
+        if index_raw is not None and not index_raw.empty:
+            return index_raw
+    except:
+        pass
+    return pd.DataFrame()
+
 @st.cache_resource(ttl=3600*24, show_spinner="🤖 Yapay Zeka Modeli Eğitiliyor...")
 def get_ai_model(market: str, tf_name: str, _tv=None) -> tuple:
     try:
