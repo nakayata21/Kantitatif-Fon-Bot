@@ -29,6 +29,15 @@ def format_telegram_message(market, df_res, status):
     msg = f"🛰️ *{market} QUANT DECISION ENGINE* ({datetime.now(TR_TZ).strftime('%H:%M')})\n"
     msg += f"⏱ Durum: {status_text}\n\n"
     
+    # ULTIMATE FUSION (UT Bot + Uyumsuzluk)
+    if "UT_Plus_Div" in df_res.columns:
+        ultimates = df_res[df_res["UT_Plus_Div"] == True].sort_values(by="Kalite", ascending=False).head(3)
+        if not ultimates.empty:
+            msg += "🚀 *ULTIMATE REVERSAL (DOUBLE CONFIRMED)*\n"
+            for _, row in ultimates.iterrows():
+                msg += f"🔥 *{row['Hisse']}* | Puan: {row['Kalite']}/100 | Hedef 1: {row.get('Hedef 1', '-')}\n"
+            msg += "*(UT Bot + Pozitif Uyumsuzluk Aynı Anda Verildi!)*\n\n"
+    
     # Gruplandırma
     groups = {"Kısa": [], "Orta": [], "Uzun": []}
     for _, row in top_buys.iterrows():

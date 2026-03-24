@@ -527,17 +527,22 @@ def score_symbol(last: pd.Series, prev: pd.Series, conf_last: pd.Series, market:
     if w_msg: durumlar.append(w_msg)
     if is_minervini: durumlar.append("🚀 MINERVINI TREND TEMPLATE")
     
-    # UT Bot'u güçlendirme: AL veriyor + Fiyat EMA20 üstünde + RSI pozitif bölgede ise güçlü bir sinyaldir
+    # UT Bot & Divergence Fusion (ULTIMATE SIGNAL)
     is_ut_strong = ut_buy and (close_val > ema20_val) and (rsi_val > 50) and (macd_curr > -0.5)
-    if is_ut_strong: 
-        durumlar.append("🤖 GÜÇLÜ UT BOT AL")
-        kalite += 5 # Ekstra güven puanı
-        
     has_bullish_div = bool(_safe_get(last, "has_bullish_div", False))
-    if has_bullish_div:
+    
+    ut_plus_div = False
+    if is_ut_strong and has_bullish_div:
+        durumlar.append("🚀 ULTIMATE REVERSAL (UT BOT + UYUMSUZLUK)")
+        kalite += 15 # Double confirmation bonus
+        ut_plus_div = True
+    elif is_ut_strong:
+        durumlar.append("🤖 GÜÇLÜ UT BOT AL")
+        kalite += 5
+    elif has_bullish_div:
         durumlar.append("🐂 POZİTİF UYUMSUZLUK (GÜÇLÜ BOĞA)")
         dip += 15
-        kalite += 5 # Uyumsuzluk güven puanı
+        kalite += 5
     
     return {
         "Vade": vade, "Kalite": round(kalite,1), "Günlük %": f"%{round(daily_return,2)}",
@@ -554,7 +559,8 @@ def score_symbol(last: pd.Series, prev: pd.Series, conf_last: pd.Series, market:
         "Konsol Durumu": konsol_tag,
         "Weinstein": w_stage_tag,
         "Trend Sablonu": "✅ GÜÇLÜ (MINERVINI)" if is_minervini else "-",
-        "UT_Bot_Al": is_ut_strong
+        "UT_Bot_Al": is_ut_strong,
+        "UT_Plus_Div": ut_plus_div
     }
 
 def score_weinstein(last: pd.Series, conf_last: pd.Series) -> Tuple[float, str, str]:
