@@ -1,4 +1,5 @@
 import os
+import pandas as pd
 from datetime import datetime
 import pytz
 
@@ -58,7 +59,25 @@ def format_telegram_message(market, df_res, status):
             if tp_pct > 0:
                 msg += f"💰 Hedef 1 (Kar Al): +%{tp_pct} ({row.get('Hedef 1', 0)})\n"
             
-            msg += f"🔍 *Metrikler:* Vol: x{row.get('Hacim Spike', 0)} | {row.get('Özel Durum', '-')}\n\n"
+            msg += f"🔍 *Teknik:* Vol: x{row.get('Hacim Spike', 0)} | {row.get('Özel Durum', '-')}\n"
+            
+            # Temel Analiz Verileri (Eğer Varsa)
+            pe = row.get("pe_ratio")
+            pb = row.get("pb_ratio")
+            grade = row.get("isy_grade")
+            
+            fund_parts = []
+            if pd.notna(pe) and pe is not None and str(pe) != "nan":
+                fund_parts.append(f"F/K: {round(float(pe), 1)}")
+            if pd.notna(pb) and pb is not None and str(pb) != "nan":
+                fund_parts.append(f"PD/DD: {round(float(pb), 1)}")
+            if grade and str(grade) != "nan" and grade != "-":
+                fund_parts.append(f"Not: {grade}")
+                
+            if fund_parts:
+                msg += f"🏢 *Temel:* {' | '.join(fund_parts)}\n"
+            
+            msg += "\n"
             
     # Güçlü UT Bot Sinyalleri
     if "UT_Bot_Al" in df_res.columns:
