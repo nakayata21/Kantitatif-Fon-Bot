@@ -13,7 +13,7 @@ from scoring import score_symbol
 from data_fetcher import fetch_hist, interval_obj
 from utils import _safe_get
 
-TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
+TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "8336526803:AAEvg9b0P9Em5MSND9uCb9RfbTGXBHDGdAA")
 ALLOWED_CHAT_IDS = [os.environ.get("TELEGRAM_CHAT_ID", "1070470722")]
 DATA_FILE = "latest_scan_results.json"
 

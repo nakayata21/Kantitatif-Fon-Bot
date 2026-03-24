@@ -1,0 +1,647 @@
+<!DOCTYPE html>
+
+<html class="dark" lang="tr"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;600;700;800&amp;family=Inter:wght@300;400;500;600&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+      tailwind.config = {
+        darkMode: "class",
+        theme: {
+          extend: {
+            colors: {
+              "primary": "#10B981", // Emerald accent
+              "on-primary": "#000000",
+              "surface": "#060b18",
+              "background": "#020617",
+              "surface-container": "#0f172a",
+              "surface-container-low": "#1e293b",
+              "secondary": "#ef4444",
+              "on-surface": "#f1f5f9",
+              "on-surface-variant": "#94a3b8",
+              "outline-variant": "#334155",
+              "tertiary": "#38bdf8",
+            },
+            fontFamily: {
+              "headline": ["Manrope", "sans-serif"],
+              "body": ["Inter", "sans-serif"],
+              "label": ["Inter", "sans-serif"]
+            },
+            borderRadius: {"DEFAULT": "0.375rem", "lg": "0.5rem", "xl": "0.75rem", "full": "9999px"},
+          },
+        },
+      }
+    </script>
+<style>
+      .material-symbols-outlined {
+        font-variation-settings: 'FILL' 0, 'wght' 300, 'GRAD' 0, 'opsz' 20;
+      }
+      ::-webkit-scrollbar { width: 4px; height: 4px; }
+      ::-webkit-scrollbar-track { background: #020617; }
+      ::-webkit-scrollbar-thumb { background: #1e293b; border-radius: 10px; }
+      
+      .glass-panel {
+        background: rgba(15, 23, 42, 0.4);
+        backdrop-filter: blur(12px);
+        border: 1px solid rgba(255, 255, 255, 0.05);
+      }
+      
+      .glow-primary {
+        box-shadow: 0 0 15px rgba(16, 185, 129, 0.2);
+      }
+      
+      .gradient-bg {
+        background: radial-gradient(circle at top left, #0f172a 0%, #020617 100%);
+      }
+
+      .sparkline-bar {
+        transition: height 0.3s ease;
+      }
+    </style>
+    <link href="https://cdn.jsdelivr.net/npm/tom-select@2.3.1/dist/css/tom-select.css" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/tom-select@2.3.1/dist/js/tom-select.complete.min.js"></script>
+    <style>
+        .ts-control { background: #0f172a !important; border-color: rgba(255,255,255,0.1) !important; color: white !important; border-radius: 12px !important; min-width: 250px; }
+        .ts-wrapper.multi .ts-control { max-height: 100px !important; overflow-y: auto !important; display: block !important; }
+        .ts-wrapper.multi .ts-control > * { z-index: 10; }
+        .ts-control::-webkit-scrollbar { width: 4px; }
+        .ts-control::-webkit-scrollbar-thumb { background: rgba(16,185,129,0.3) !important; border-radius: 4px; }
+        .ts-control input { color: white !important; display: inline-block !important; }
+        .ts-dropdown { background: #0f172a !important; border-color: rgba(255,255,255,0.1) !important; color: white !important; }
+        .ts-dropdown .active { background: #1e293b !important; color: #10B981 !important; }
+        .ts-control .item { background: rgba(16,185,129,0.2) !important; color: #10B981 !important; border: 1px solid rgba(16,185,129,0.3) !important; border-radius: 6px !important; font-weight: bold; padding: 2px 8px !important; margin: 3px !important; font-size: 11px; display: inline-block !important; }
+    </style>
+</head>
+<body class="gradient-bg text-on-surface font-body overflow-hidden h-screen">
+<!-- TopNavBar -->
+<header class="fixed top-0 z-50 w-full h-16 border-b border-white/5 glass-panel px-6 flex justify-between items-center">
+<div class="flex items-center gap-10">
+<div class="flex items-center gap-2">
+<div class="w-8 h-8 bg-primary/20 rounded-lg flex items-center justify-center">
+<span class="material-symbols-outlined text-primary font-bold">diamond</span>
+</div>
+<span class="text-lg font-extrabold tracking-tight bg-clip-text text-transparent bg-gradient-to-r from-white to-slate-400">Obsidian Ledger</span>
+</div>
+<div class="hidden lg:flex items-center gap-8">
+<div class="flex flex-col">
+<span class="text-[10px] uppercase text-on-surface-variant font-bold tracking-widest">BIST 100</span>
+<span class="text-sm font-semibold text-primary flex items-center gap-1">9.142,30 <span class="text-[10px] bg-primary/10 px-1 rounded">+1.2%</span></span>
+</div>
+<div class="flex flex-col">
+<span class="text-[10px] uppercase text-on-surface-variant font-bold tracking-widest">USD/TRY</span>
+<span class="text-sm font-semibold text-secondary flex items-center gap-1">31.42,15 <span class="text-[10px] bg-secondary/10 px-1 rounded">-0.4%</span></span>
+</div>
+</div>
+</div>
+<div class="flex-1 max-w-2xl px-12">
+<div class="relative flex items-center">
+<span class="material-symbols-outlined absolute left-4 text-on-surface-variant">search</span>
+<input class="w-full bg-white/5 border border-white/10 rounded-full pl-11 pr-4 py-2 text-xs focus:outline-none focus:ring-1 focus:ring-primary/50 focus:bg-white/10 transition-all placeholder:text-slate-500" placeholder="Sembol, endeks veya haber ara..." type="text"/>
+</div>
+</div>
+<div class="flex items-center gap-2">
+<button class="w-10 h-10 flex items-center justify-center hover:bg-white/5 transition-colors rounded-full text-on-surface-variant hover:text-white">
+<span class="material-symbols-outlined">notifications</span>
+</button>
+<button class="w-10 h-10 flex items-center justify-center hover:bg-white/5 transition-colors rounded-full text-on-surface-variant hover:text-white">
+<span class="material-symbols-outlined">analytics</span>
+</button>
+<div class="w-px h-6 bg-white/10 mx-2"></div>
+<button class="flex items-center gap-2 pl-2 pr-1 py-1 rounded-full hover:bg-white/5 transition-all">
+<span class="text-xs font-medium hidden md:block">Caner Ö.</span>
+<div class="w-8 h-8 rounded-full bg-gradient-to-br from-primary to-emerald-700 flex items-center justify-center text-[10px] font-bold text-black ring-2 ring-white/5">CÖ</div>
+</button>
+</div>
+</header>
+<div class="flex h-screen pt-16">
+<!-- SideNavBar -->
+<nav class="w-20 md:w-64 border-r border-white/5 bg-slate-950/20 flex flex-col py-6 transition-all duration-300">
+<div class="flex flex-col gap-1 px-3">
+<a class="flex items-center gap-4 px-4 py-3 rounded-lg text-on-surface-variant hover:text-white hover:bg-white/5 transition-all group" href="#">
+<span class="material-symbols-outlined group-hover:scale-110 transition-transform">grid_view</span>
+<span class="hidden md:block text-sm font-medium">Dashboard</span>
+</a>
+<a class="flex items-center gap-4 px-4 py-3 rounded-lg text-primary bg-primary/10 border border-primary/20 transition-all group" href="#">
+<span class="material-symbols-outlined">filter_list</span>
+<span class="hidden md:block text-sm font-semibold">Screener</span>
+</a>
+<a class="flex items-center gap-4 px-4 py-3 rounded-lg text-on-surface-variant hover:text-white hover:bg-white/5 transition-all group" href="#">
+<span class="material-symbols-outlined group-hover:scale-110 transition-transform">account_balance_wallet</span>
+<span class="hidden md:block text-sm font-medium">Portfolio</span>
+</a>
+<a class="flex items-center gap-4 px-4 py-3 rounded-lg text-on-surface-variant hover:text-white hover:bg-white/5 transition-all group" href="#">
+<span class="material-symbols-outlined group-hover:scale-110 transition-transform">monitoring</span>
+<span class="hidden md:block text-sm font-medium">Analysis</span>
+</a>
+<a class="flex items-center gap-4 px-4 py-3 rounded-lg text-on-surface-variant hover:text-white hover:bg-white/5 transition-all group" href="#">
+<span class="material-symbols-outlined group-hover:scale-110 transition-transform">news</span>
+<span class="hidden md:block text-sm font-medium">Market News</span>
+</a>
+</div>
+<div class="mt-auto px-3">
+<a class="flex items-center gap-4 px-4 py-3 rounded-lg text-on-surface-variant hover:text-white hover:bg-white/5 transition-all" href="#">
+<span class="material-symbols-outlined">settings</span>
+<span class="hidden md:block text-sm font-medium">Settings / Pro</span>
+</a>
+</div>
+</nav>
+<!-- Main Content -->
+<main class="flex-1 overflow-y-auto">
+<div class="flex flex-col h-full">
+<!-- Header Area -->
+<div class="p-8 pb-4">
+<div class="flex justify-between items-center mb-8">
+<div>
+<h1 class="text-3xl font-extrabold font-headline tracking-tight text-white">Hisse Tarayıcı</h1>
+<p class="text-sm text-on-surface-variant mt-1">Gelişmiş veri setleri ile pazar fırsatlarını analiz edin.</p>
+</div>
+<div class="flex flex-col gap-3">
+<div class="flex items-start gap-3">
+    <div class="flex flex-col">
+        <select id="symbols-input" multiple placeholder="Hisse Ara & Seç (Boş = Tümü)"></select>
+        <div class="flex gap-3 px-2 mt-1">
+            <button type="button" onclick="selectAll()" class="text-[10px] text-primary uppercase font-bold tracking-widest hover:opacity-80 transition-opacity">Tümünü Seç</button>
+            <button type="button" onclick="clearAll()" class="text-[10px] text-secondary uppercase font-bold tracking-widest hover:opacity-80 transition-opacity">Temizle</button>
+        </div>
+    </div>
+    <select id="tf-select" class="bg-slate-900 border border-white/10 text-white font-bold text-sm rounded-full px-4 py-2 focus:ring-1 focus:ring-primary focus:outline-none transition-all">
+        <option value="Gunluk">Günlük (1D)</option>
+        <option value="4 Saatlik">4 Saatlik (4H)</option>
+        <option value="Haftalik">Haftalık (1W)</option>
+        <option value="Gunluk + Haftalik">Günlük + Haftalık</option>
+    </select>
+    <select id="market-select" class="bg-slate-900 border border-white/10 text-white font-bold text-sm rounded-full px-4 py-2 focus:ring-1 focus:ring-primary focus:outline-none transition-all">
+        <option value="BIST">BIST</option>
+        <option value="NASDAQ">NASDAQ</option>
+        <option value="CRYPTO">CRYPTO</option>
+    </select>
+    <button id="start-scan-btn" onclick="startScan()" class="bg-gradient-to-r from-emerald-500 to-primary text-black px-6 py-2.5 rounded-full font-bold text-sm flex items-center gap-2 hover:shadow-[0_0_20px_rgba(16,185,129,0.3)] transition-all transform hover:-translate-y-0.5 glow-primary">
+        <span class="material-symbols-outlined text-xl" id="scan-icon">play_arrow</span>
+        <span id="scan-text">Taramayı Başlat</span>
+    </button>
+</div>
+<div class="flex items-center gap-4 mt-2">
+    <label class="flex items-center gap-2 cursor-pointer text-xs text-white">
+        <input type="checkbox" id="only-buy" class="form-checkbox bg-slate-800 border-white/20 text-primary rounded focus:ring-primary focus:ring-offset-slate-900">
+        <span class="font-bold">Sadece 'AL' Olanları Göster</span>
+    </label>
+    <div class="flex items-center gap-2">
+        <span class="text-[10px] text-slate-500 font-bold uppercase">Gecikme (ms)</span>
+        <input type="number" id="delay-ms" value="500" step="50" min="0" class="w-16 bg-slate-800 border trans border-white/10 text-[10px] text-white rounded px-2 py-1 focus:outline-none focus:ring-1 focus:ring-primary">
+    </div>
+    <div class="flex items-center gap-2">
+        <span class="text-[10px] text-slate-500 font-bold uppercase">Paralel Hız</span>
+        <select id="workers" class="bg-slate-800 border border-white/10 text-white text-[10px] rounded px-2 py-1 focus:outline-none focus:ring-1 focus:ring-primary">
+            <option value="1">1</option>
+            <option value="2">2</option>
+            <option value="3">3</option>
+            <option value="4">4</option>
+            <option value="5" selected>5</option>
+        </select>
+    </div>
+</div>
+</div>
+</div>
+<div class="grid grid-cols-4 gap-3 my-4">
+    <div class="bg-slate-800/50 border border-white/5 rounded-xl p-3 flex flex-col items-center justify-center">
+        <span class="text-[10px] uppercase text-slate-500 font-bold tracking-widest">Taranan Toplam</span>
+        <span class="text-xl font-mono text-white mt-1" id="m_toplam">0</span>
+    </div>
+    <div class="bg-primary/5 border border-primary/20 rounded-xl p-3 flex flex-col items-center justify-center">
+        <span class="text-[10px] uppercase text-primary font-bold tracking-widest">AL Sinyali Verenler</span>
+        <span class="text-xl font-mono text-primary mt-1" id="m_al">0</span>
+    </div>
+    <div class="bg-slate-800/50 border border-white/5 rounded-xl p-3 flex flex-col items-center justify-center">
+        <span class="text-[10px] uppercase text-slate-500 font-bold tracking-widest">Ortalama Güven</span>
+        <span class="text-xl font-mono text-white mt-1" id="m_guven">-</span>
+    </div>
+    <div class="bg-secondary/5 border border-secondary/20 rounded-xl p-3 flex flex-col items-center justify-center">
+        <span class="text-[10px] uppercase text-secondary font-bold tracking-widest">Ortalama Risk</span>
+        <span class="text-xl font-mono text-secondary mt-1" id="m_risk">-</span>
+    </div>
+</div>
+<div class="flex flex-wrap items-center gap-2 mb-4" id="strategy-filters">
+<span class="text-[10px] uppercase tracking-wider text-slate-500 font-bold mr-2">Sıralama Stratejisi:</span>
+<button onclick="applySort('Kalite')" class="strategy-btn bg-primary/10 border border-primary/30 text-primary px-3 py-1.5 rounded-full text-xs flex items-center gap-2 font-semibold transition-colors">⭐ Kalite</button>
+<button onclick="applySort('Elite Skor')" class="strategy-btn bg-white/5 border border-white/10 px-3 py-1.5 rounded-full text-xs flex items-center gap-2 hover:bg-white/10 transition-colors">💎 Elit Hisseler</button>
+<button onclick="applySort('Dip Skor')" class="strategy-btn bg-white/5 border border-white/10 px-3 py-1.5 rounded-full text-xs flex items-center gap-2 hover:bg-white/10 transition-colors">📉 Dip</button>
+<button onclick="applySort('Momentum Skor')" class="strategy-btn bg-white/5 border border-white/10 px-3 py-1.5 rounded-full text-xs flex items-center gap-2 hover:bg-white/10 transition-colors">📈 Momentum</button>
+<button onclick="applySort('Hacim Spike')" class="strategy-btn bg-white/5 border border-white/10 px-3 py-1.5 rounded-full text-xs flex items-center gap-2 hover:bg-white/10 transition-colors">💥 Hacim Spike</button>
+<button onclick="applySort('Konsol Skor')" class="strategy-btn bg-white/5 border border-white/10 px-3 py-1.5 rounded-full text-xs flex items-center gap-2 hover:bg-white/10 transition-colors">📐 Konsolidasyon</button>
+</div>
+</div>
+<!-- Content Grid -->
+<div class="flex-1 grid grid-cols-12 p-8 gap-8 overflow-hidden">
+<!-- Table Area -->
+<div class="col-span-12 lg:col-span-8">
+<div class="glass-panel rounded-2xl overflow-hidden">
+<div class="absolute left-0 top-0 bottom-0 w-1 bg-primary"></div><table class="w-full text-left border-collapse">
+<thead>
+<tr class="border-b border-white/5 bg-white/[0.02]">
+<th class="px-6 py-4 text-[10px] font-extrabold text-on-surface-variant uppercase tracking-widest">Sembol</th>
+<th class="px-4 py-4 text-[10px] font-extrabold text-on-surface-variant uppercase tracking-widest text-right">Son Fiyat / %</th>
+<th class="px-4 py-4 text-[10px] font-extrabold text-on-surface-variant uppercase tracking-widest text-center">AI Tahmin</th>
+<th class="px-4 py-4 text-[10px] font-extrabold text-on-surface-variant uppercase tracking-widest text-center">Hacim Spike</th>
+<th class="px-4 py-4 text-[10px] font-extrabold text-on-surface-variant uppercase tracking-widest text-right">R/R & Risk</th>
+<th class="px-6 py-4 text-[10px] font-extrabold text-on-surface-variant uppercase tracking-widest text-right">Puan & Güven</th>
+<th class="px-6 py-4 text-[10px] font-extrabold text-on-surface-variant uppercase tracking-widest text-right">Durum / Sinyal</th>
+</tr>
+</thead>
+<tbody id="scan-results" class="divide-y divide-white/5">
+<!-- Javascript will populate rows here -->
+<tr class="hover:bg-white/[0.04] transition-all cursor-pointer group text-center">
+    <td colspan="6" class="px-6 py-5 text-slate-500 text-sm">Tarama başlatmak için yukarıdaki butona tıklayın.</td>
+</tr>
+</tbody>
+</table>
+</div>
+
+<!-- AI Asistan -->
+<div class="mt-8 bg-slate-800/50 border border-white/5 rounded-2xl p-6 relative overflow-hidden group">
+    <div class="absolute inset-0 bg-gradient-to-r from-primary/5 to-transparent"></div>
+    <div class="relative z-10">
+        <div class="flex items-center gap-3 mb-4">
+            <span class="material-symbols-outlined text-primary text-3xl">smart_toy</span>
+            <div>
+                <h3 class="text-white font-bold text-lg">Yapay Zeka Asistanı</h3>
+                <p class="text-xs text-slate-400">Taranan hisseler arasından özel koşullar iste veya yorumlat.</p>
+            </div>
+        </div>
+        <div class="flex gap-3">
+            <input type="text" id="ai-query" placeholder="Örn: En düşük düşüş riskine sahip olan ilk 3 hisseyi benim için açıkla." class="flex-1 bg-slate-900 border border-white/10 text-white text-sm rounded-lg px-4 py-3 focus:ring-1 focus:ring-primary focus:outline-none placeholder:text-slate-600">
+            <button onclick="askAI()" id="ai-btn" class="bg-primary text-black px-6 py-3 rounded-lg font-bold text-sm hover:bg-emerald-400 transition-colors flex items-center gap-2">
+                <span class="material-symbols-outlined text-lg" id="ai-icon">send</span> Sor
+            </button>
+        </div>
+        <div class="mt-4 hidden p-4 bg-slate-900/50 border border-white/10 rounded-lg text-slate-300 text-sm whitespace-pre-wrap" id="ai-response"></div>
+    </div>
+</div>
+
+</div>
+<!-- Analysis Sidebar -->
+<div class="hidden lg:block lg:col-span-4 space-y-6">
+<!-- Detail Header -->
+<div class="glass-panel rounded-2xl p-6">
+<div class="flex justify-between items-start mb-6">
+<div>
+<div class="flex items-center gap-2 mb-1">
+<h3 class="text-2xl font-black text-white font-headline">EREGL.IS</h3>
+<span class="px-1.5 py-0.5 rounded bg-white/10 text-[10px] font-bold text-slate-400">BIST</span>
+</div>
+<p class="text-[11px] text-on-surface-variant font-medium tracking-wide">Ereğli Demir Çelik Fabrikaları T.A.Ş.</p>
+</div>
+<div class="text-right">
+<p class="text-2xl font-mono font-bold text-secondary">45.12</p>
+<p class="text-[11px] text-secondary font-bold flex items-center justify-end gap-1">
+<span class="material-symbols-outlined text-xs">south</span> -1.12% Today
+                                </p>
+</div>
+</div>
+<!-- Mini Chart -->
+<div class="h-44 w-full bg-slate-950/40 rounded-xl border border-white/5 p-4 mb-6 relative overflow-hidden">
+<div class="flex justify-between items-center mb-4">
+<span class="text-[9px] uppercase tracking-widest text-slate-500 font-bold">Teknik Analiz (1H Candlestick)</span>
+<div class="flex gap-2">
+<span class="text-[10px] font-bold px-2 py-0.5 rounded bg-white/5 cursor-pointer hover:bg-white/10">1D</span>
+<span class="text-[10px] font-bold px-2 py-0.5 rounded bg-primary/20 text-primary border border-primary/20 cursor-pointer">1H</span>
+</div>
+</div>
+<!-- Simple Bar Chart Representation -->
+<div class="flex items-end justify-between h-24 px-2 gap-2">
+<div class="relative w-full h-[60%] flex flex-col items-center">
+<div class="w-px h-[120%] bg-secondary/30 absolute -top-[10%]"></div>
+<div class="w-full h-full bg-secondary/60 rounded-sm"></div>
+</div>
+<div class="relative w-full h-[85%] flex flex-col items-center">
+<div class="w-px h-[110%] bg-primary/30 absolute -top-[5%]"></div>
+<div class="w-full h-full bg-primary/60 rounded-sm"></div>
+</div>
+<div class="relative w-full h-[55%] flex flex-col items-center">
+<div class="w-px h-[130%] bg-secondary/30 absolute -top-[15%]"></div>
+<div class="w-full h-full bg-secondary/60 rounded-sm"></div>
+</div>
+<div class="relative w-full h-[45%] flex flex-col items-center">
+<div class="w-px h-[120%] bg-primary/30 absolute -top-[10%]"></div>
+<div class="w-full h-full bg-primary/60 rounded-sm"></div>
+</div>
+<div class="relative w-full h-[70%] flex flex-col items-center">
+<div class="w-px h-[115%] bg-secondary/30 absolute -top-[10%]"></div>
+<div class="w-full h-full bg-secondary/60 rounded-sm"></div>
+</div>
+<div class="relative w-full h-[50%] flex flex-col items-center">
+<div class="w-px h-[120%] bg-secondary/30 absolute -top-[10%]"></div>
+<div class="w-full h-full bg-secondary rounded-sm"></div>
+</div>
+</div>
+</div>
+<!-- Fundamental Metrics -->
+<div class="space-y-4">
+<div class="flex items-center gap-2">
+<span class="w-1.5 h-1.5 rounded-full bg-primary"></span>
+<h4 class="text-[10px] uppercase font-bold text-slate-400 tracking-widest">Temel Göstergeler</h4>
+</div>
+<div class="grid grid-cols-2 gap-3">
+<div class="bg-white/[0.03] p-3 rounded-xl border border-white/5">
+<p class="text-[9px] text-slate-500 uppercase font-bold mb-1">Piyasa Değeri</p>
+<p class="text-sm font-bold text-white">157.92B <span class="text-[9px] text-slate-500 font-normal">TRY</span></p>
+</div>
+<div class="bg-white/[0.03] p-3 rounded-xl border border-white/5">
+<p class="text-[9px] text-slate-500 uppercase font-bold mb-1">F/K Oranı</p>
+<p class="text-sm font-bold text-white">8.15</p>
+</div>
+<div class="bg-white/[0.03] p-3 rounded-xl border border-white/5">
+<p class="text-[9px] text-slate-500 uppercase font-bold mb-1">PD/DD</p>
+<p class="text-sm font-bold text-white">1.42</p>
+</div>
+<div class="bg-white/[0.03] p-3 rounded-xl border border-white/5">
+<p class="text-[9px] text-slate-500 uppercase font-bold mb-1">Temettü Verimi</p>
+<p class="text-sm font-bold text-primary">4.2%</p>
+</div>
+</div>
+</div>
+</div>
+<!-- News Section -->
+<div class="glass-panel rounded-2xl p-6">
+<div class="flex items-center justify-between mb-5">
+<div class="flex items-center gap-2">
+<span class="w-1.5 h-1.5 rounded-full bg-tertiary"></span>
+<h4 class="text-[10px] uppercase font-bold text-slate-400 tracking-widest">İlgili Haberler</h4>
+</div>
+<button class="text-[10px] font-bold text-tertiary hover:underline">Tümünü Gör</button>
+</div>
+<div class="space-y-5">
+<div class="group cursor-pointer">
+<h5 class="text-xs font-semibold text-white leading-relaxed group-hover:text-tertiary transition-colors">Ereğli Demir Çelik'ten yeni yatırım hamlesi: Kapasite artırımı yolda.</h5>
+<div class="flex items-center gap-3 mt-2">
+<span class="text-[10px] text-slate-500 font-medium">2 saat önce</span>
+<span class="w-1 h-1 bg-slate-700 rounded-full"></span>
+<span class="text-[9px] font-extrabold text-primary border border-primary/30 px-1.5 py-0.5 rounded-sm bg-primary/5 uppercase">KAP</span>
+</div>
+</div>
+<div class="h-px bg-white/5"></div>
+<div class="group cursor-pointer">
+<h5 class="text-xs font-semibold text-white leading-relaxed group-hover:text-tertiary transition-colors">Global çelik fiyatlarındaki dalgalanma hisse performansını etkiliyor.</h5>
+<div class="flex items-center gap-3 mt-2">
+<span class="text-[10px] text-slate-500 font-medium">5 saat önce</span>
+<span class="w-1 h-1 bg-slate-700 rounded-full"></span>
+<span class="text-[9px] font-extrabold text-tertiary border border-tertiary/30 px-1.5 py-0.5 rounded-sm bg-tertiary/5 uppercase">Haber</span>
+</div>
+</div>
+</div>
+</div>
+</div>
+</div>
+</div>
+</main>
+</div>
+</body>
+<script>
+let currentData = [];
+let activeSortKey = "Kalite";
+
+function applySort(sortKey) {
+    activeSortKey = sortKey;
+    
+    // Update button styles
+    document.querySelectorAll('.strategy-btn').forEach(btn => {
+        if(btn.innerText.includes(sortKey) || btn.getAttribute('onclick').includes(sortKey)) {
+            btn.className = "strategy-btn bg-primary/10 border border-primary/30 text-primary px-3 py-1.5 rounded-full text-xs flex items-center gap-2 font-semibold transition-colors";
+        } else {
+            btn.className = "strategy-btn bg-white/5 border border-white/10 px-3 py-1.5 rounded-full text-xs flex items-center gap-2 hover:bg-white/10 transition-colors text-white";
+        }
+    });
+
+    if(currentData.length > 0) {
+        renderTable(currentData);
+    }
+}
+
+function renderTable(dataArray) {
+    const tbody = document.getElementById("scan-results");
+    tbody.innerHTML = "";
+    
+    // Sort array safely
+    let sortedData = [...dataArray].sort((a, b) => {
+        let valA = a[activeSortKey] || 0;
+        let valB = b[activeSortKey] || 0;
+        return Number(valB) - Number(valA); // Descending
+    });
+
+    // Gelişmiş sıralamalar (Hacim Spike ve Squeeze)
+    if(activeSortKey === "Hacim Spike") {
+        sortedData = sortedData.filter(i => (i["Hacim Spike"] || 0) >= 2.0);
+    } else if(activeSortKey === "Konsol Skor") {
+        sortedData = sortedData.filter(i => (i["Konsol Skor"] || 0) > 0);
+    }
+    
+        const showOnlyBuy = document.getElementById("only-buy").checked;
+        if(showOnlyBuy) {
+            sortedData = sortedData.filter(i => i["Sinyal"] === "AL");
+        }
+        
+        // Yüzdelikleri güncelle
+        document.getElementById("m_toplam").innerText = sortedData.length;
+        const alCount = sortedData.filter(i => i["Sinyal"] === "AL").length;
+        document.getElementById("m_al").innerText = alCount;
+        
+        let sumGuven = 0, sumRisk = 0, countGuven = 0, countRisk = 0;
+        sortedData.forEach(i => {
+           if(i["Guven"] && !isNaN(parseFloat(i["Guven"]))) { sumGuven += parseFloat(i["Guven"]); countGuven++; }
+           if(i["Düşüş Riski"] && !isNaN(parseFloat(i["Düşüş Riski"]))) { sumRisk += parseFloat(i["Düşüş Riski"]); countRisk++; } 
+        });
+    document.getElementById("m_guven").innerText = countGuven ? (sumGuven/countGuven).toFixed(1) : "-";
+    document.getElementById("m_risk").innerText = countRisk ? (sumRisk/countRisk).toFixed(1) : "-";
+
+    if (sortedData.length > 0) {
+        sortedData.forEach(item => {
+            const isBuy = item["Sinyal"] === "AL";
+            const rowColor = isBuy ? "bg-primary/5 hover:bg-primary/[0.08]" : "hover:bg-white/[0.04]";
+            const valColor = isBuy ? "text-primary bg-primary/10" : "text-secondary bg-secondary/10";
+            
+            const sym = item["Hisse"] || "--";
+            const close = item["Son"] || 0;
+            const change = item["Değişim"] || "0%";
+            const kalite = item["Kalite"] || item["Elite Skor"] || "--";
+            const guven = item["Guven"] || "--";
+            const trend = item["Trend Skor"] || valColor;
+            const rr = item["R/R"] || "-";
+            const risk = item["Düşüş Riski"] || "-";
+            const hs = item["Hacim Spike"] || "0";
+            const ai = item["AI Tahmin"] || "-";
+            const aksi = item["Aksiyon"] || "";
+            
+            const tr = document.createElement("tr");
+            tr.className = `${rowColor} transition-all cursor-pointer group relative border-b border-white/5 last:border-0`;
+            tr.innerHTML = `
+                <td class="px-6 py-5">
+                    <div class="flex items-center gap-4">
+                        <div class="w-10 h-10 rounded-xl bg-slate-800 border border-white/10 flex items-center justify-center text-xs font-bold ${isBuy ? 'text-primary' : 'text-slate-300'}">
+                            ${sym.substring(0, 2)}
+                        </div>
+                        <div>
+                            <p class="font-bold text-sm text-white group-hover:text-primary transition-colors">${sym}</p>
+                            <p class="text-[10px] text-on-surface-variant uppercase tracking-tight">${item["Daralma (Squeeze)"] || "Hisse/Coin"}</p>
+                        </div>
+                    </div>
+                </td>
+                <td class="px-4 py-5 text-right">
+                    <p class="font-mono text-sm font-bold text-white">${close}</p>
+                    <span class="font-mono text-[10px] px-1 py-0.5 rounded ${valColor}">${change}</span>
+                </td>
+                <td class="px-4 py-5 text-center font-mono text-sm text-slate-300">${ai}</td>
+                <td class="px-4 py-5 text-center font-mono text-sm ${hs >= 2 ? 'text-primary font-bold' : 'text-slate-400'}">${hs}x</td>
+                <td class="px-4 py-5 text-right font-mono text-xs text-slate-400">
+                    <span class="text-white">${rr}</span><br>
+                    <span class="text-[10px]">Risk: ${risk}</span>
+                </td>
+                <td class="px-4 py-5 text-right font-mono text-xs text-slate-300">
+                    Kalite: <span class="text-white font-bold">${kalite}</span><br>
+                    Güven: <span class="text-white text-[10px]">${guven}</span>
+                </td>
+                <td class="px-6 py-5 text-right">
+                    <span class="font-mono text-[10px] px-2 py-1 rounded border border-white/10 bg-white/5 uppercase tracking-wider ${isBuy ? 'text-primary' : ''}">${item["Sinyal"] || "-"}</span>
+                    ${aksi ? `<br><span class="text-[9px] text-slate-400 mt-1 block">${aksi}</span>` : ''}
+                </td>
+            `;
+            tbody.appendChild(tr);
+        });
+    } else {
+        tbody.innerHTML = `<tr><td colspan="6" class="px-6 py-5 text-center text-slate-500">Kriterlere uygun veri bulunamadı.</td></tr>`;
+    }
+}
+
+async function startScan() {
+    const btnText = document.getElementById("scan-text");
+    const btnIcon = document.getElementById("scan-icon");
+    const tbody = document.getElementById("scan-results");
+    
+    // Loading state
+    btnText.innerText = "Taranıyor...";
+    btnIcon.innerText = "hourglass_empty";
+    document.getElementById("start-scan-btn").disabled = true;
+    tbody.innerHTML = `
+        <tr class="text-center">
+            <td colspan="6" class="px-6 py-10 text-slate-400">
+                <span class="material-symbols-outlined animate-spin text-4xl text-primary mb-2">refresh</span>
+                <p>Veriler canlı olarak işleniyor... Piyasa büyüklüğüne göre sürebilir.</p>
+            </td>
+        </tr>
+    `;
+
+    const exchange = document.getElementById("market-select").value;
+    const tf = document.getElementById("tf-select").value;
+    const symbols_str = symbolSelect.getValue().join(",");
+    const delayMs = document.getElementById("delay-ms").value;
+    const workers = document.getElementById("workers").value;
+    
+    currentData = []; // Clear current session
+    
+    let url = `/api/scan?exchange=${encodeURIComponent(exchange)}&tf_name=${encodeURIComponent(tf)}&symbols_str=${encodeURIComponent(symbols_str)}&delay_ms=${delayMs}&workers=${workers}`;
+    
+    const eventSource = new EventSource(url);
+    
+    let totalCount = 0;
+
+    eventSource.onmessage = function(event) {
+        const result = JSON.parse(event.data);
+        if(result.type === "start") {
+            totalCount = result.total;
+            btnText.innerText = `0 / ${totalCount} Tarandı...`;
+        } else if(result.type === "result") {
+            currentData.push(result.data);
+            btnText.innerText = `${result.completed} / ${totalCount} Tarandı...`;
+            renderTable(currentData.slice(0, 50)); // Gelişimi canlı göster (limitli ki kiltlenmesin)
+        } else if(result.type === "error") {
+            btnText.innerText = `${result.completed} / ${totalCount} Tarandı...`;
+        } else if(result.type === "done") {
+            eventSource.close();
+            btnText.innerText = "Taramayı Başlat";
+            btnIcon.innerText = "play_arrow";
+            document.getElementById("start-scan-btn").disabled = false;
+            applySort(activeSortKey); // son bitişte tam sırala
+        }
+    };
+
+    eventSource.onerror = function(err) {
+        eventSource.close();
+        btnText.innerText = "Taramayı Başlat";
+        btnIcon.innerText = "play_arrow";
+        document.getElementById("start-scan-btn").disabled = false;
+        if(currentData.length === 0) {
+           tbody.innerHTML = `<tr><td colspan="6" class="px-6 py-5 text-center text-secondary">Bağlantı koptu. Tekrar deneyin.</td></tr>`;
+        }
+    };
+}
+
+async function askAI() {
+    const query = document.getElementById("ai-query").value;
+    if(!query || currentData.length === 0) { alert("Lütfen önce tarama yapın ve soru yazın."); return; }
+    
+    document.getElementById("ai-response").classList.remove("hidden");
+    document.getElementById("ai-response").innerText = "AI düşünüyor, lütfen bekleyin...";
+    document.getElementById("ai-btn").disabled = true;
+    document.getElementById("ai-icon").innerText = "hourglass_empty";
+    
+    try {
+        const response = await fetch("/api/ai_chat", {
+            method: "POST",
+            headers: {"Content-Type": "application/json"},
+            body: JSON.stringify({ query: query, data: currentData.slice(0, 30) }) // İlk 30 hisse token tasarrufu için
+        });
+        const json = await response.json();
+        if(json.error) document.getElementById("ai-response").innerText = "Hata: " + json.error;
+        else document.getElementById("ai-response").innerText = json.answer;
+    } catch(err) {
+        document.getElementById("ai-response").innerText = "Bağlantı hatası: " + err.message;
+    } finally {
+        document.getElementById("ai-btn").disabled = false;
+        document.getElementById("ai-icon").innerText = "send";
+    }
+}
+
+function selectAll() {
+    if(symbolSelect && window.allSymbolsData) {
+        const m = document.getElementById("market-select").value;
+        const allIds = window.allSymbolsData[m];
+        symbolSelect.setValue(allIds);
+    }
+}
+
+function clearAll() {
+    if(symbolSelect) {
+        symbolSelect.clear();
+    }
+}
+
+let symbolSelect;
+document.addEventListener("DOMContentLoaded", async () => {
+    try {
+        const res = await fetch("/api/symbols");
+        const symbols = await res.json();
+        window.allSymbolsData = symbols;
+        
+        symbolSelect = new TomSelect("#symbols-input", {
+            plugins: ['remove_button'],
+            create: false,
+            maxOptions: 500,
+            valueField: 'id',
+            labelField: 'title',
+            searchField: 'title',
+            maxItems: null,
+            options: symbols["BIST"].map(s => ({id: s, title: s}))
+        });
+
+        document.getElementById("market-select").addEventListener("change", (e) => {
+            const m = e.target.value;
+            symbolSelect.clear();
+            symbolSelect.clearOptions();
+            symbolSelect.addOptions(window.allSymbolsData[m].map(s => ({id: s, title: s})));
+        });
+    } catch(err) {
+        console.error("Symbols yuklenemedi", err);
+    }
+});
+</script>
+</html>

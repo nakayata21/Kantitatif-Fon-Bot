@@ -82,14 +82,16 @@ def calculate_elite_score(technical: Dict, fundamental: Dict) -> Dict[str, objec
     tech_konsol = float(technical.get("Konsol Skor", 0))
     sinyal = technical.get("Sinyal", "SAT")
     
-    fund_score = float(fundamental.get("fundamental_score", 0))
-    fund_grade = fundamental.get("fundamental_grade", "-")
+    fund_score = float(fundamental.get("isy_score") if fundamental.get("isy_score") is not None else fundamental.get("fundamental_score", 0))
+    fund_grade = fundamental.get("isy_grade") if fundamental.get("isy_grade") else fundamental.get("fundamental_grade", "-")
     pe = fundamental.get("pe_ratio")
+    pb = fundamental.get("pb_ratio")
     roe = fundamental.get("roe")
     roa = fundamental.get("roa")
     de = fundamental.get("debt_to_equity")
     rg = fundamental.get("revenue_growth")
     eg = fundamental.get("earnings_growth")
+    f_score = fundamental.get("piotroski_score", 0)
     
     tech_component = (
         (tech_kalite * 0.25) +
@@ -99,9 +101,9 @@ def calculate_elite_score(technical: Dict, fundamental: Dict) -> Dict[str, objec
         (tech_guven * 0.05)
     )
     
-    if tech_risk > 60:
+    if tech_risk > 70:
         tech_component *= 0.6
-    elif tech_risk > 45:
+    elif tech_risk > 55:
         tech_component *= 0.8
     
     if sinyal == "AL":
@@ -135,6 +137,19 @@ def calculate_elite_score(technical: Dict, fundamental: Dict) -> Dict[str, objec
     if tech_smart_money >= 50 and pe is not None and pe < 25:
         elite_bonus += 5
         elite_reasons.append("💰 Kurumsal+Ucuz")
+        
+    # Bilanço Patlaması (Earnings Surprise) & Borç Azaltımı
+    debt_growth = fundamental.get("debt_growth")
+    if eg is not None and eg >= 1.0:
+        elite_bonus += 25
+        elite_reasons.append("💥 BİLANÇO PATLAMASI (Kâr x2)")
+    elif eg is not None and eg >= 0.50:
+        elite_bonus += 15
+        elite_reasons.append("🚀 Güçlü Kâr Büyümesi")
+        
+    if debt_growth is not None and debt_growth <= -0.50:
+        elite_bonus += 20
+        elite_reasons.append("📉 Güçlü Borç Azaltımı")
     
     elite_penalty = 0
     if pe is not None and pe < 0:
@@ -175,11 +190,21 @@ def calculate_elite_score(technical: Dict, fundamental: Dict) -> Dict[str, objec
         "Borç/Özkaynak": round(de, 2) if de else "-",
         "Gelir Büyüme %": round(rg * 100, 1) if rg else "-",
         "Kar Büyüme %": round(eg * 100, 1) if eg else "-",
+        "pe_ratio": pe,
+        "pb_ratio": pb,
+        "isy_score": fund_score,
+        "isy_grade": fund_grade,
+        "piotroski_score": f_score
     }
 
 def score_symbol(last: pd.Series, prev: pd.Series, conf_last: pd.Series, market: str = "NASDAQ", index_healthy: bool = True) -> Dict[str, object]:
-    mtf_ok    = bool(_safe_get(conf_last, "ema20", 0) > _safe_get(conf_last, "ema50", 0) and _safe_get(conf_last, "macd_hist", 0) > 0)
-    regime_ok = bool((_safe_get(last, "adx", 0) >= 18) and (1.0 <= _safe_get(last, "atr_pct", 0) <= 9.0))
+    # MTF ve Rejim Kontrolü
+    if market == "CRYPTO":
+        mtf_ok = bool(_safe_get(conf_last, "macd_hist", 0) > 0)
+        regime_ok = bool((_safe_get(last, "adx", 0) >= 15) and (0.3 <= _safe_get(last, "atr_pct", 0) <= 20.0))
+    else:
+        mtf_ok = bool(_safe_get(conf_last, "ema20", 0) > _safe_get(conf_last, "ema50", 0) and _safe_get(conf_last, "macd_hist", 0) > 0)
+        regime_ok = bool((_safe_get(last, "adx", 0) >= 18) and (0.8 <= _safe_get(last, "atr_pct", 0) <= 10.0))
 
     vol_spike_val = float(_safe_get(last, "vol_spike", 0.0))
     ema20_slope   = float(_safe_get(last, "ema20_slope", 0.0))
@@ -214,342 +239,329 @@ def score_symbol(last: pd.Series, prev: pd.Series, conf_last: pd.Series, market:
 
     macd_cross_up  = (macd_curr > 0) and (macd_prev <= 0)
     bb_lower_cross = (close_val > bb_lower_curr) and (prev_close <= bb_lower_prev)
-    is_pump_dump = (rsi_val > 68) and (daily_return > 2.5) and (vol_spike_val < 1.0)
     
-    min_liquidity = 50_000_000 if market == "BIST" else 5_000_000
+    if market == "CRYPTO":
+        is_pump_dump = (rsi_val > 80) and (daily_return > 7.0) and (vol_spike_val < 0.8)
+    else:
+        is_pump_dump = (rsi_val > 72) and (daily_return > 3.0) and (vol_spike_val < 1.0)
+    
+    min_liquidity = 50_000_000 if market == "BIST" else (500_000 if market == "CRYPTO" else 2_000_000)
     is_liquid = avg_turnover >= min_liquidity
 
+    # 1. TREND SKORU OPTİMİZASYONU
     trend = 0.0
-    trend += 20 if ema20_val > sma50_val else 0
+    trend += 25 if ema20_val > sma50_val else 0
     trend += 10 if close_val > sma20_val else 0
     trend += 8  if macd_curr > 0 else 0
-    trend += 8  if mtf_ok else 0
-    trend += 6  if ema20_slope > 0.5 else 0
+    trend += 10 if mtf_ok else 0
+    trend += 8  if ema20_slope > 0.5 else (-10 if ema20_slope < -0.5 else 0)
     trend += 15 if (sma200_val > 0 and close_val > sma200_val) else 0
-    trend += 10 if (sma50_val > 0 and sma200_val > 0 and sma50_val > sma200_val) else 0
+    trend += 12 if (sma50_val > 0 and sma200_val > 0 and sma50_val > sma200_val) else 0
     trend += 10 if (sma50_val > 0 and close_val > sma50_val) else 0
+    trend += 5  if (rsi_val > 50 and rsi_val > prev_rsi) else 0
 
+    # 2. DİP SKORU (TOPLAMA/BİRİKİM)
     support_120_val = float(_safe_get(last, "support_120", 0.0))
     ema20_prev = float(_safe_get(prev, "ema20", 0.0))
-    is_rsi_oversold = rsi_val <= 30
+    is_rsi_oversold = rsi_val <= 32
     is_rsi_rising = (rsi_val > prev_rsi) and (rsi_val < 50)
     is_price_above_ma20 = (close_val > ema20_val) and (prev_close <= ema20_prev)
-    is_near_bottom = (support_120_val > 0) and (((close_val - support_120_val) / support_120_val) * 100 <= 6.0)
-    is_volume_up = (vol_spike_val >= 1.5)
+    is_near_bottom = (support_120_val > 0) and (((close_val - support_120_val) / support_120_val) * 100 <= 5.0)
+    is_volume_up = (vol_spike_val >= 1.3)
 
     dip = 0.0
-    dip += 20 if is_rsi_oversold else 0
+    dip += 25 if is_rsi_oversold else 0
     dip += 15 if is_rsi_rising else 0
-    dip += 15 if macd_cross_up else 0
-    dip += 10 if _safe_get(last, "pos_div", False) else 0
+    dip += 20 if macd_cross_up else 0
+    dip += 15 if _safe_get(last, "pos_div", False) else 0
     dip += 15 if is_price_above_ma20 else 0
-    dip += 20 if is_near_bottom else 0
+    dip += 25 if is_near_bottom else 0
     dip += 5 if is_volume_up else 0
-    if bb_pct > 0.8:
-        dip -= 30
+    if bb_pct > 0.85: dip -= 40 # Aşırı ısınmışsa dip puanı kır
     
     dip_signals = []
-    if is_rsi_oversold: dip_signals.append("✓ RSI < 30")
-    if is_rsi_rising: dip_signals.append("✓ RSI Yükseliyor")
+    if is_rsi_oversold: dip_signals.append("✓ RSI Aşırı Satım")
+    if is_rsi_rising: dip_signals.append("✓ RSI Dönüşü")
     if macd_cross_up: dip_signals.append("✓ MACD Kesti")
     if is_price_above_ma20: dip_signals.append("✓ MA20 Kırıldı")
-    if is_near_bottom: dip_signals.append("✓ Son Dönem Dibi")
-    if is_volume_up: dip_signals.append("✓ Hacim Patladı")
+    if is_near_bottom: dip_signals.append("✓ Destek Bölgesi")
+    if is_volume_up: dip_signals.append("✓ Alıcı Girişi")
     dip_signal_str = " | ".join(dip_signals) if dip_signals else "-"
-    is_solid_bottom = dip >= 40
+    is_solid_bottom = dip >= 45
 
+    # 3. BREAKOUT (KIRILIM) SKORU
     breakout_up = bool(_safe_get(last, "breakout_up", False))
     breakout = 0.0
-    breakout += 18 if breakout_up else 0
+    breakout += 20 if breakout_up else 0
+    breakout += 15 if (breakout_up and vol_spike_val >= 1.5) else (-10 if breakout_up and vol_spike_val < 0.8 else 0)
     breakout += 15 if (breakout_up and bb_width_val < 8.0) else 0
-    breakout += 12 if b52w else 0
+    breakout += 15 if b52w else 0
     breakout += 15 if breakout_60 else 0
-    breakout += 12 if gap_pct_val > 2.0 else 0 
-    breakout +=  8 if mtf_ok else 0
+    if market == "CRYPTO":
+        breakout += 15 if daily_return > 5.0 else 0
+    else:
+        breakout += 12 if gap_pct_val > 2.0 else 0 
+    breakout += 10 if mtf_ok else 0
 
+    # 4. MOMENTUM SKORU
     momentum = 0.0
     momentum += 15 if macd_cross_up else 0
-    momentum += 10 if _safe_get(last, "obv", 0) > _safe_get(prev, "obv", 0) else 0
-    momentum += 16 if (macd_curr > 0 and macd_curr > macd_prev) else 0
-    momentum += 10 if (50 <= rsi_val <= 70) else 0
-    momentum +=  8 if mtf_ok else 0
-    momentum +=  8 if roc20 > 3.0 else 0
+    momentum += 12 if _safe_get(last, "obv", 0) > _safe_get(prev, "obv", 0) else 0
+    momentum += 15 if (macd_curr > 0 and macd_curr > macd_prev) else 0
+    momentum += 10 if (52 <= rsi_val <= 68) else 0
+    momentum += 10 if mtf_ok else 0
+    momentum += 10 if roc20 > 5.0 else 0
+    momentum += 10 if (ut_pos == 1) else 0
 
     trend    = clamp(trend)
     dip      = clamp(dip)
     breakout = clamp(breakout)
     momentum = clamp(momentum)
 
+    # 5. SMART MONEY VE PARA AKIŞI
     smart_money = 0.0
-    smart_money += 20 if inst_bar else 0
+    if market == "CRYPTO":
+        smart_money += 25 if (daily_return > 3.0 and vol_spike_val >= 1.8 and close_val > prev_close) else 0
+    else:
+        smart_money += 25 if inst_bar else 0
     smart_money += 20 if ut_buy else 0
-    smart_money += 15 if (vol_spike_val >= 2.0) else 0
-    smart_money += 10 if (vol_spike_val >= 1.5) else 0
+    smart_money += 15 if (vol_spike_val >= 2.0) else (10 if vol_spike_val >= 1.5 else 0)
     smart_money += 10 if _safe_get(last, "higher_lows_5", False) else 0
-    smart_money += 10 if adx_val >= 20 else 0
+    
+    mfi_val = float(_safe_get(last, "mfi", 50.0))
+    if mfi_val > 65: smart_money += 20
+    elif mfi_val > 50: smart_money += 10
+    elif mfi_val < 35: smart_money -= 15
     smart_money = clamp(smart_money)
 
-    market_regime = "TREND" if adx_val >= 20 else "CHOP"
-    if market_regime == "TREND":
-        w_trend, w_dip, w_breakout, w_momentum, w_sm = 0.15, 0.05, 0.30, 0.30, 0.20
-    else: 
-        w_trend, w_dip, w_breakout, w_momentum, w_sm = 0.10, 0.35, 0.15, 0.20, 0.20
-
-    general  = clamp((trend * w_trend) + (dip * w_dip) + (breakout * w_breakout) + (momentum * w_momentum) + (smart_money * w_sm))
-
-    risk = 15.0
-    risk += 30 if not regime_ok else 0
-    risk += 50 if not index_healthy else 0
-    risk += 25 if ema20_dist > 15.0 else 0    
-    risk += 15 if ema20_dist > 8.0 else 0     
-    risk += 20 if rsi_val > 70 else 0         
-    risk += 30 if daily_return > 8.0 else 0   
-    risk += 15 if daily_return > 6.0 and daily_return <= 8.0 else 0 
-    risk += 35 if daily_return < -4.0 else 0  
-    risk += 15 if daily_return < -2.5 and daily_return >= -4.0 else 0
-    risk +=  8 if atr_pct_val > 7.0 else 0   
-    risk +=  8 if adx_val < 15 else 0         
-    risk += 15 if (sma200_val > 0 and close_val < sma200_val) else 0 
-    risk += 35 if not is_liquid else 0
-    risk += 40 if gap_pct_val > 2.0 and vol_spike_val < 1.0 else 0
-    is_pd_aggressive = (rsi_val > 75) and (daily_return > 3.0) and (vol_spike_val < 1.2)
-    risk += 60 if (is_pump_dump or is_pd_aggressive) else 0
-    risk += 30 if _safe_get(last, "neg_div", False) else 0
-    risk += 25 if (daily_return > 0 and vol_spike_val < 0.8) else 0 # Hacimsiz yükseliş (Distribution riski)
-    risk += 10 if gap_pct_val < -2.0 else 0   
-    risk = clamp(risk)
-
-    confidence = clamp(
-        20
-        + (20 if mtf_ok else 0)
-        + (18 if regime_ok else 0)
-        + (15 if ema20_slope > 0 else 0)
-    )
-
-    ut_recent = ut_buy or bool(prev.get("ut_buy", False))
-    ut_long   = (ut_pos == 1)
-
-    if market == "NASDAQ":
-        buy_general, buy_conf, buy_risk, buy_sm = 45, 55, 50, 10
-    else:
-        buy_general, buy_conf, buy_risk, buy_sm = 45, 50, 55, 5
-
-    is_fresh_buy = ut_recent and general >= buy_general and risk <= buy_risk and index_healthy
-    is_bottom_buy = is_solid_bottom and risk <= (buy_risk - 5) and index_healthy
-    is_trend_buy = ut_long and general >= (buy_general + 5) and confidence >= buy_conf and smart_money >= buy_sm and risk <= buy_risk and index_healthy
-
-    is_overextended_hard = (ema20_dist > 8.0) or (rsi_val > 75) or (roc20 > 18.0) # Sert koruma: Hızlı gitmişse peşinden koşma
-    
-    atr_val = float(_safe_get(last, "atr", 0.0))
-    support_120_val = float(_safe_get(last, "support_120", 0.0))
-    stop = max(0.0, close_val - (1.5 * atr_val))
-    if is_solid_bottom and support_120_val > 0 and support_120_val < close_val:
-        stop = min(stop, support_120_val * 0.98)
-        
-    risk_amount = close_val - stop
-    tp1 = close_val + (1.5 * risk_amount) if risk_amount > 0 else 0.0
-    tp2 = close_val + (2.5 * risk_amount) if risk_amount > 0 else 0.0
-    tp3 = close_val + (4.0 * risk_amount) if risk_amount > 0 else 0.0
-    target = tp3
-    rr = (tp1 - close_val) / risk_amount if (risk_amount > 0 and tp1 > close_val) else 0.0
-    
-    is_rr_bad = rr < 1.2
-    
-    engine_type = "SAFE"
-    if vol_spike_val >= 2.0 and float(_safe_get(last, "bb_width", 100)) < 15.0:
-        engine_type = "OPPORTUNITY"
-
-    kalite = general - (risk * 0.50) + (confidence * 0.25)
-    
-    if is_overextended_hard or not is_liquid or (is_rr_bad and engine_type == "SAFE"):
-        decision = "NO TRADE"
-        signal, action = "SAT", "NO TRADE (Risk Filtresi)"
-    elif kalite >= 80 and is_rr_bad == False:
-        decision = "HIGH CONVICTION"
-        signal = "AL"
-        if is_bottom_buy: action = "🚀 Dip Reversal (Trend Devamı)"
-        elif is_trend_buy: action = "📈 Trend Continuation"
-        else: action = "🔥 Momentum Ignition"
-    elif kalite >= 60:
-        decision = "TRADE READY"
-        signal = "AL"
-        if engine_type == "OPPORTUNITY": action = "⚡ Squeeze Breakout (Agresif)"
-        elif is_bottom_buy: action = "📉 Dip Fırsatı"
-        else: action = "🔥 Potansiyel Setup"
-    elif kalite >= 45:
-        decision = "WATCHLIST"
-        signal = "BEKLE"
-        action = "Hacim ve Kırılım Bekleniyor"
-    else:
-        decision = "NO TRADE"
-        signal, action = "SAT", "Kriterleri Karşılamadı"
-        
-    sma200_dist = ((close_val - sma200_val) / sma200_val) * 100 if sma200_val > 0 else 0.0
-    overextend_penalty = 1.0
-    overextend_reasons = []
-    
-    if ema20_dist > 8.0:
-        overextend_penalty *= 0.30
-        overextend_reasons.append("⚠️ EMA20'den %8+ Kopuk (Geç Kalınmış)")
-    elif ema20_dist > 5.0:
-        overextend_penalty *= 0.60
-        overextend_reasons.append("⚠️ EMA20'den %5+ Uzaklaştı")
-    
-    if rsi_val >= 75:
-        overextend_penalty *= 0.30
-        overextend_reasons.append("🔴 RSI 75+ (Riskli Bölge)")
-    elif rsi_val >= 68:
-        overextend_penalty *= 0.60
-        overextend_reasons.append("🟡 RSI 68+ (Isınmış)")
-    
-    if sma200_dist > 50.0:
-        overextend_penalty *= 0.50
-        overextend_reasons.append("🎈 SMA200'den %50+ (Balon Riski)")
-    elif sma200_dist > 30.0:
-        overextend_penalty *= 0.75
-        overextend_reasons.append("⚠️ SMA200'den %30+ Uzak")
-    
-    if roc20 > 18.0:
-        overextend_penalty *= 0.30
-        overextend_reasons.append("🚀 20 Günde %18+ Yükselmiş (Fırsat Kaçmış)")
-    elif roc20 > 10.0:
-        overextend_penalty *= 0.60
-        overextend_reasons.append("📈 20 Günde %10+ Yükselmiş")
-    
-    is_overextended = overextend_penalty < 0.95
-    kalite *= overextend_penalty
-    
-    # "Sıfır Noktası" (Henüz patlamamış olanları) Liste başına itme algoritması
-    if (signal == "AL") and (roc20 <= 5.0) and (konsol >= 40 or is_solid_bottom):
-        kalite += 30  # Telegramda en üste çıksın diye büyük bonus
-    elif (signal == "AL") and (roc20 <= 8.0):
-        kalite += 15
-
-    kalite = clamp(kalite)
-
+    # 6. KONSOLİDASYON ANALİZİ
     range_pct_20  = float(_safe_get(last, "range_pct_20",  15.0))
     lr_slope      = float(_safe_get(last, "lr_slope_20",    0.0))
     vol_ratio_520 = float(_safe_get(last, "vol_ratio_5_20", 1.0))
     ud_vol_ratio  = float(_safe_get(last, "ud_vol_ratio",   1.0))
     pos_in_range  = float(_safe_get(last, "pos_in_20d_range", 0.5))
-    close_vs_ema  = close_val > ema20_val
     bb_squeeze    = bool(_safe_get(last, "bb_squeeze", False))
 
     konsol = 0.0
     konsol_signals = []
-    if range_pct_20 < 12:
-        konsol += 20
-        konsol_signals.append("✓ Çok Dar Aralık")
+    if range_pct_20 < 10:
+        konsol += 25
+        konsol_signals.append("✓ Ultra Dar Range")
     elif range_pct_20 < 18:
         konsol += 12
-        konsol_signals.append("✓ Dar Aralık")
-    elif range_pct_20 < 25:
-        konsol += 5
+        konsol_signals.append("✓ Dar Range")
 
-    if abs(lr_slope) < 0.8:
-        konsol += 15
-        konsol_signals.append("✓ Yatay Sürünme")
-    elif abs(lr_slope) < 1.5:
-        konsol += 8
+    if abs(lr_slope) < 0.6:
+        konsol += 20
+        konsol_signals.append("✓ Tam Yatay")
+    elif abs(lr_slope) < 1.2:
+        konsol += 10
         konsol_signals.append("✓ Hafif Eğim")
-    elif abs(lr_slope) < 2.5:
-        konsol += 3
 
     if bb_squeeze:
         konsol += 20
         konsol_signals.append("✓ Bollinger Sıkışması")
     if adx_val < 20:
         konsol += 15
-        konsol_signals.append("✓ Trendsiz (ADX<20)")
-    elif adx_val < 25:
-        konsol += 8
-        konsol_signals.append("✓ Zayıf Trend")
+        konsol_signals.append("✓ Düşük Volatilite (ADX)")
 
-    if atr_pct_val < 3:
-        konsol += 12
-        konsol_signals.append("✓ Çok Düşük Vol.")
-    elif atr_pct_val < 5:
-        konsol += 7
-        konsol_signals.append("✓ Düşük Vol.")
-
-    if vol_ratio_520 < 0.7:
+    if vol_ratio_520 < 0.8:
         konsol += 10
-        konsol_signals.append("✓ Hacim Kurudu")
-    elif vol_ratio_520 < 0.9:
-        konsol += 5
-        konsol_signals.append("✓ Hacim Azaldı")
+        konsol_signals.append("✓ Hacim Kuruması")
 
-    if pos_in_range > 0.65:
-        konsol += 8
-        konsol_signals.append("✓ Range Üstü")
-    elif pos_in_range > 0.45:
-        konsol += 4
-    if close_vs_ema:
-        konsol += 5
-        konsol_signals.append("✓ EMA20 Üstü")
-    if ud_vol_ratio > 1.3:
-        konsol += 8
-        konsol_signals.append("✓ Alıcı Baskın")
-    elif ud_vol_ratio > 1.1:
-        konsol += 4
+    if ud_vol_ratio > 1.2:
+        konsol += 10
+        konsol_signals.append("✓ Alıcı Birikimi")
 
-    if is_pump_dump: konsol -= 20
-    if not is_liquid: konsol -= 15
-    if atr_pct_val > 7: konsol -= 10
-    if adx_val > 30: konsol -= 15
-    if vol_ratio_520 > 2.0: konsol -= 10
+    if is_pump_dump: konsol -= 30
+    if not is_liquid: konsol -= 20
+    if adx_val > 35: konsol -= 20
 
     konsol = clamp(konsol)
     konsol_signal_str = " | ".join(konsol_signals) if konsol_signals else "-"
-    if konsol >= 60: konsol_tag = "🔵 Güçlü Birikim"
-    elif konsol >= 40: konsol_tag = "🟡 Sıkışma"
-    elif konsol >= 20: konsol_tag = "⚪ Zayıf"
+    if konsol >= 65: konsol_tag = "🔵 Ultra Birikim"
+    elif konsol >= 45: konsol_tag = "🟡 Sıkışma"
+    elif konsol >= 25: konsol_tag = "⚪ Zayıf"
     else: konsol_tag = "-"
 
-    durumlar = []
-    if is_solid_bottom: durumlar.append("🚨 DİPTEN DÖNÜŞ (40+PUAN)")
-    if is_overextended: durumlar.extend(overextend_reasons)
-    ozel_durum_str = " | ".join(durumlar) if durumlar else "-"
+    # 9. STAN WEINSTEIN STAGE ANALYSIS
+    w_score, w_msg, w_stage_tag = score_weinstein(last, conf_last)
 
+    # VADE VE AĞIRLIKLANDIRMA (Weinstein eklendi)
+    is_long_vade = bool(sma200_val > 0 and close_val > sma200_val * 1.02)
+    is_mid_vade = bool(sma50_val > 0 and close_val > sma50_val * 1.01)
+    
+    if is_long_vade:
+        vade = "Uzun"
+        # Weinstein uzun vadide %25 etkili olsun
+        w_trend, w_dip, w_breakout, w_momentum, w_sm, w_wein = 0.30, 0.05, 0.20, 0.10, 0.10, 0.25
+    elif is_mid_vade:
+        vade = "Orta"
+        w_trend, w_dip, w_breakout, w_momentum, w_sm, w_wein = 0.20, 0.15, 0.20, 0.10, 0.15, 0.20
+    else:
+        vade = "Kısa"
+        if adx_val >= 25: # Trend marketi
+            w_trend, w_dip, w_breakout, w_momentum, w_sm, w_wein = 0.15, 0.05, 0.15, 0.30, 0.20, 0.15
+        else: # Yatay market
+            w_trend, w_dip, w_breakout, w_momentum, w_sm, w_wein = 0.05, 0.35, 0.10, 0.20, 0.20, 0.10
+
+    general = clamp(
+        (trend * w_trend) + (dip * w_dip) + (breakout * w_breakout) + 
+        (momentum * w_momentum) + (smart_money * w_sm) + (w_score * w_wein)
+    )
+
+    # Mark Minervini Trend Template Kontrolü
+    is_minervini = bool(_safe_get(last, "minervini_template", False))
+    if is_minervini:
+        general = clamp(general + 15) # Güçlü trend bonusu
+
+    # 7. RİSK ANALİZİ OPTİMİZASYONU
+    risk = 10.0
+    risk += 20 if not regime_ok else 0
+    risk += 30 if not index_healthy else 0
+    risk += 35 if ema20_dist > 12.0 else (15 if ema20_dist > 7.0 else 0)
+    risk += 30 if rsi_val > 78 else (15 if rsi_val > 70 else 0)
+    risk += 30 if daily_return > 10.0 else (15 if daily_return > 6.0 else 0)
+    risk += 40 if daily_return < -5.0 else (20 if daily_return < -3.0 else 0)
+    risk += 10 if atr_pct_val > 8.0 else 0
+    risk += 15 if adx_val < 12 else 0
+    risk += 20 if (sma200_val > 0 and close_val < sma200_val) else 0
+    risk += 40 if not is_liquid else 0
+    risk += 35 if _safe_get(last, "neg_div", False) else 0
+    
+    # Weinstein Stage 4 ise risk artır
+    if w_score < -20: risk += 25
+
+    is_exhaustion = (rsi_val > 82) and (ema20_dist > 12.0)
+    if is_exhaustion: risk += 50
+    if is_pump_dump: risk += 50
+    risk = clamp(risk)
+
+    confidence = clamp(20 + (25 if mtf_ok else 0) + (15 if regime_ok else 0) + (20 if ema20_slope > 0 else -10))
+
+    # 8. KALİTE VE KARAR MEKANİZMASI
+    # Kalite puanı artık riske daha duyarlı
+    kalite = (general * 0.6) + (confidence * 0.4) - (risk * 0.4)
+    
+    # Overextension Cezası
+    overextend_penalty = 1.0
+    overextend_reasons = []
+    if ema20_dist > 8.0:
+        overextend_penalty *= 0.4
+        overextend_reasons.append("⚠️ EMA20'den Çok Uzak")
+    if rsi_val >= 78:
+        overextend_penalty *= 0.5
+        overextend_reasons.append("🔴 RSI Aşırı Alım")
+    if roc20 > 25.0:
+        overextend_penalty *= 0.5
+        overextend_reasons.append("🚀 Fiyat Balon Riski")
+    
+    kalite *= overextend_penalty
+    
+    # "Sıfır Noktası" Bonusu (Taze kırılımlar için)
+    if (general >= 50) and (roc20 <= 6.0) and (konsol >= 45 or is_solid_bottom):
+        kalite += 35
+        overextend_reasons.append("🔥 TAZE KIRILIM / BİRİKİM SONU")
+
+    kalite = clamp(kalite)
+
+    # KARARLAR
+    if is_exhaustion or rsi_val > 85:
+        decision, signal, action = "TAKE PROFIT", "SAT", "🚨 EXTREME SATIŞ BÖLGESİ"
+    elif w_score <= -40 and ema20_slope < 0:
+        # Şort (Aşağı Yönlü) Tarama Modülü - Aşama 4 Çöküşü
+        decision, signal, action = "TRADE READY", "AÇIĞA SAT", "🔻 ŞORT (AŞAMA 4 ÇÖKÜŞÜ)"
+    elif (overextend_penalty < 0.6 and daily_return > 5.0) or not is_liquid:
+        decision, signal, action = "NO TRADE", "SAT", "🚫 RİSKLİ / SIĞ TAHTA"
+    elif kalite >= 78:
+        decision, signal = "HIGH CONVICTION", "AL"
+        if is_near_bottom: action = "💎 ELMAS DİP (GÜÇLÜ AL)"
+        elif b52w: action = "🚀 52 HAFTALIK ZİRVE KIRILIMI"
+        elif bb_squeeze and breakout_up: action = "💥 PATLAMA (SQUEEZE BREAK)"
+        else: action = "🔥 YÜKSEK GÜVENLİ AL"
+    elif kalite >= 50:
+        decision, signal = "TRADE READY", "AL"
+        if breakout_up: action = "📈 DİRENÇ KIRILDI"
+        elif is_solid_bottom: action = "📉 DİPTEN DÖNÜŞ"
+        else: action = "✅ ALIM İÇİN UYGUN"
+    elif w_score >= 30: # Weinstein Stage 2 Entry
+        decision, signal, action = "TRADE READY", "AL", "🚀 WEINSTEIN AŞAMA 2 LİFT-OFF"
+    elif kalite >= 35:
+        decision, signal, action = "WATCHLIST", "BEKLE", "⌛ HACİM/ORDİNO BEKLENİYOR"
+    else:
+        decision, signal, action = "NO TRADE", "SAT", "❌ ZAYIF GÖRÜNÜM"
+
+    # Stop ve Hedefler
+    atr_val = float(_safe_get(last, "atr", 0.0))
+    stop = max(0.0, close_val - (1.8 * atr_val))
+    if is_near_bottom and support_120_val > 0: stop = min(stop, support_120_val * 0.97)
+    
+    risk_amt = close_val - stop
+    tp1 = close_val + (1.5 * risk_amt) if risk_amt > 0 else 0
+    tp2 = close_val + (2.8 * risk_amt) if risk_amt > 0 else 0
+    tp3 = close_val + (4.5 * risk_amt) if risk_amt > 0 else 0
+    rr = (tp1 - close_val) / risk_amt if (risk_amt > 0) else 0
+
+    durumlar = []
+    if is_solid_bottom: durumlar.append("🚨 DİPTEN DÖNÜYOR")
+    if overextend_reasons: durumlar.extend(overextend_reasons)
+    if inst_bar: durumlar.append("💰 KURUMSAL GİRİŞ")
+    if bb_squeeze: durumlar.append("🗜️ SIKIŞMA VAR")
+    if w_msg: durumlar.append(w_msg)
+    if is_minervini: durumlar.append("🚀 MINERVINI TREND TEMPLATE")
+    
     return {
-        "Kalite":        round(kalite, 1),
-        "Günlük %":      f"%{round(daily_return, 2)}",
-        "Skor":          round(general, 1),
-        "Smart Money Skor": round(smart_money, 1),
-        "Kurumsal Giriş": "🟢 Güçlü" if smart_money >= 70 else ("🟡 İzlenir" if smart_money >= 45 else "Zayıf"),
-        "Trend Skor":    round(trend, 1),
-        "Dip Skor":      round(dip, 1),
-        "Breakout Skor": round(breakout, 1),
-        "Momentum Skor": round(momentum, 1),
-        "Konsol Skor":   round(konsol, 1),
+        "Vade": vade, "Kalite": round(kalite,1), "Günlük %": f"%{round(daily_return,2)}",
+        "Skor": round(general,1), "Smart Money Skor": round(smart_money,1),
+        "Trend Skor": round(trend,1), "Dip Skor": round(dip,1), "Breakout Skor": round(breakout,1),
+        "Momentum Skor": round(momentum,1), "Konsol Skor": round(konsol,1),
+        "Dusus Riski": round(risk,1), "Guven": round(confidence,1),
+        "Decision": decision, "Sinyal": signal, "Aksiyon": action,
+        "Fiyat": close_val, "Stop Loss": round(stop,4), "Hedef 1": round(tp1,4), "Hedef 2": round(tp2,4), "Hedef 3": round(tp3,4),
+        "R/R": round(rr,2), "Likidite": "✅ UYGUN" if is_liquid else "🚫 SIĞ",
+        "Özel Durum": " | ".join(durumlar) if durumlar else "-",
+        "Para Akışı (MFI)": round(mfi_val, 1),
+        "OBV Durumu": "📈 Artıyor" if _safe_get(last, "obv", 0) > _safe_get(prev, "obv", 0) else "📉 Azalıyor",
         "Konsol Durumu": konsol_tag,
-        "Konsol Sinyal": konsol_signal_str,
-        "Dusus Riski":   round(risk, 1),
-        "Guven":         round(confidence, 1),
-        "Decision":      decision,
-        "Engine":        engine_type,
-        "Sinyal":        signal,
-        "Aksiyon":       action,
-        "Fiyat":         close_val,
-        "Stop Loss":     round(stop, 4),
-        "Hedef 1":       round(tp1, 4),
-        "Hedef 2":       round(tp2, 4),
-        "Hedef 3":       round(tp3, 4),
-        "Hedef 1 %":     round(((tp1 - close_val) / close_val) * 100, 1) if tp1 > close_val else 0,
-        "Hedef 2 %":     round(((tp2 - close_val) / close_val) * 100, 1) if tp2 > close_val else 0,
-        "Hedef 3 %":     round(((tp3 - close_val) / close_val) * 100, 1) if tp3 > close_val else 0,
-        "Stop %":        round(((close_val - stop) / close_val) * 100, 1) if stop < close_val else 0,
-        "R/R":           round(rr, 2),
-        "Likidite":      "✅ Uygun" if is_liquid else "🚫 Çok Sığ",
-        "UT Bot":        "🟢 YESİL" if ut_pos == 1 else "🔴 KIRMIZI",
-        "MACD Durumu":   "🔥 Taze Kesti" if macd_cross_up else "-",
-        "Bollinger":     "🟢 Dipten Zıpladı" if bb_lower_cross else "-",
-        "Kurumsal SMA200": "Üstünde" if (sma200_val > 0 and close_val > sma200_val) else ("Altında" if sma200_val > 0 else "N/A"),
-        "Gap":           f"%{round(gap_pct_val, 2)}",
-        "Teyit":         "Evet" if mtf_ok else "Hayir",
-        "Özel Durum":    ozel_durum_str,
-        "Dip Sinyalleri": dip_signal_str,
-        "BB %":          round(bb_pct * 100, 1),
-        "Para Akışı (MFI)": round(float(_safe_get(last, "mfi", 50.0)), 1),
-        "OBV Durumu":     "📈 Artıyor" if _safe_get(last, "obv", 0) > _safe_get(prev, "obv", 0) else "📉 Azalıyor",
+        "Weinstein": w_stage_tag,
+        "Trend Sablonu": "✅ GÜÇLÜ (MINERVINI)" if is_minervini else "-"
     }
+
+def score_weinstein(last: pd.Series, conf_last: pd.Series) -> Tuple[float, str, str]:
+    """Stan Weinstein Stage Analysis (Aşama Analizi) Skorlaması.
+    Haftalık veri (conf_last) üzerinden çalışır.
+    """
+    weinstein_score = 0.0
+    stage_msg = ""
+    
+    # Haftalık veri üzerinden Weinstein göstergeleri
+    w_close = float(_safe_get(conf_last, "close", 0.0))
+    w_sma30 = float(_safe_get(conf_last, "sma30_w", 0.0))
+    w_slope = float(_safe_get(conf_last, "sma30_w_slope", 0.0))
+    w_volume = float(_safe_get(conf_last, "volume", 0.0))
+    w_vol_ma4 = float(_safe_get(conf_last, "vol_ma4_w", 0.0))
+    w_stage = int(_safe_get(conf_last, "weinstein_stage", 0))
+    
+    # Buy Signal Criteria (Transition to Stage 2)
+    # - Price > 30-Week SMA
+    # - Slope > 0 (turning up)
+    # - Volume > 2x average (breakout confirmation)
+    is_stage2_entry = (w_close > w_sma30) and (w_slope > 0) and (w_volume > w_vol_ma4 * 2.0)
+    
+    if is_stage2_entry:
+        weinstein_score += 40
+        stage_msg = "🚀 WEINSTEIN AŞAMA 2 (GÜÇLÜ BOĞA)"
+    elif w_stage == 2:
+        weinstein_score += 20
+        stage_msg = "📈 WEINSTEIN AŞAMA 2 (TREND)"
+    elif w_stage == 4:
+        weinstein_score -= 40
+        stage_msg = "📉 WEINSTEIN AŞAMA 4 (MELTDOWN)"
+    elif w_stage == 3:
+        weinstein_score -= 15
+        stage_msg = "⚠️ WEINSTEIN AŞAMA 3 (DAĞITIM)"
+    elif w_stage == 1:
+        weinstein_score += 5
+        stage_msg = "📐 WEINSTEIN AŞAMA 1 (TABAN YAPMA)"
+
+    return weinstein_score, stage_msg, f"Aşama {w_stage}"

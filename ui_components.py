@@ -89,4 +89,6 @@ def signal_style(v: str) -> str:
 def action_style(v: str) -> str:
     if "AL" in v:
         return "background-color:#dcfce7;color:#166534;font-weight:700;"
+    elif "ŞORT" in v or "SAT" in v:
+        return "background-color:#fee2e2;color:#991b1b;font-weight:700;"
     return "background-color:#fef3c7;color:#92400e;font-weight:700;"

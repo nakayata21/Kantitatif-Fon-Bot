@@ -79,8 +79,33 @@ DEFAULT_BIST_HISSELER = [
 ]
 
 DEFAULT_CRYPTO_SYMBOLS = [
-    "BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT", "XRPUSDT", "ADAUSDT", "AVAXUSDT", 
-    "LINKUSDT", "MATICUSDT", "DOGEUSDT", "DOTUSDT", "UNIUSDT", "LTCUSDT", "ATOMUSDT",
-    "NEARUSDT", "APTUSDT", "OPUSDT", "ARBUSDT", "INJUSDT", "RNDRUSDT", "TIAUSDT",
-    "SUIUSDT", "SEIUSDT", "FETUSDT", "AGIXUSDT"
+    "BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT", "XRPUSDT", "USDCUSDT", "ADAUSDT",
+    "DOGEUSDT", "TRXUSDT", "AVAXUSDT", "DOTUSDT", "SHIBUSDT", "LINKUSDT", "TONUSDT",
+    "XLMUSDT", "SUIUSDT", "BCHUSDT", "LTCUSDT", "PEPEUSDT", "NEARUSDT", "HBARUSDT",
+    "UNIUSDT", "APTUSDT", "LEOUSDT", "ICPUSDT", "RENDERUSDT", "ETCUSDT", "ARBUSDT",
+    "CROUSDT", "KASUSDT", "FETUSDT", "VETUSDT", "FILUSDT", "STXUSDT", "OMUSDT",
+    "TAOUSDT", "MNTUSDT", "OPUSDT", "WIFUSDT", "RUNEUSDT", "ALGOUSDT", "ATOMUSDT",
+    "BONKUSDT", "AAVEUSDT", "THETAUSDT", "IMXUSDT", "ENAUSDT", "ARUSDT", "SEIUSDT",
+    "FLOKIUSDT", "FLOWUSDT", "JUPUSDT", "BEAMUSDT", "LDOUSDT", "PYTHUSDT", "EGLDUSDT",
+    "JASMYUSDT", "GALAUSDT", "COREUSDT", "TIAUSDT", "STRKUSDT", "DYDXUSDT", "BRETTUSDT",
+    "MKRUSDT", "PENDLEUSDT", "BGBUSDT", "GRTUSDT", "AKTUSDT", "FTMUSDT", "RAYUSDT",
+    "NOTUSDT", "POPCATUSDT", "MOGUSDT", "ONDOUSDT", "ENSUSDT", "QNTUSDT", "MASKUSDT",
+    "AXSUSDT", "MANAUSDT", "SANDUSDT", "ROSEUSDT", "KAVAUSDT", "CRVUSDT", "GNOUSDT",
+    "NEOUSDT", "CFXUSDT", "JTOUSDT", "CHZUSDT", "AEVOUSDT", "DYMUSDT", "MINAUSDT",
+    "BLURUSDT", "WLDUSDT", "KCSUSDT", "XDCUSDT", "ZKUSDT", "IOUSDT", "ZILUSDT", "BOMEUSDT"
 ]
+
+BIST_SECTORS = {
+    "AKBNK": "Banka", "GARAN": "Banka", "ISCTR": "Banka", "YKBNK": "Banka", "HALKB": "Banka", "VAKBN": "Banka",
+    "THYAO": "Ulaştırma", "PGSUS": "Ulaştırma", "TAVHL": "Ulaştırma",
+    "EREGL": "Demir Çelik", "KRDMD": "Demir Çelik", "ISDMR": "Demir Çelik",
+    "TUPRS": "Enerji/Petrol", "PETKM": "Kimya", "SASA": "Kimya", "HEKTS": "Kimya/Tarım",
+    "ASELS": "Savunma", "TCELL": "İletişim", "TTKOM": "İletişim", "SISE": "Cam",
+    "KCHOL": "Holding", "SAHOL": "Holding", "AGHOL": "Holding", "DOHOL": "Holding",
+    "BIMAS": "Perakende", "MGROS": "Perakende", "SOKM": "Perakende",
+    "ASTOR": "Enerji", "EUPWR": "Enerji", "SMRTG": "Enerji", "KONTR": "Enerji", "GESAN": "Enerji",
+    "DOAS": "Otomotiv", "FROTO": "Otomotiv", "TOASO": "Otomotiv", "TTRAK": "Otomotiv",
+    "ENJSA": "Enerji", "AKSEN": "Enerji", "CWENE": "Enerji", "ALARK": "Holding",
+}
+
+

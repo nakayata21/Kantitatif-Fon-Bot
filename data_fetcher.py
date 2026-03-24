@@ -15,14 +15,90 @@ from utils import _safe_get
 from indicators import add_indicators
 from scoring import calculate_piotroski
 
+@st.cache_data(ttl=3600*24, show_spinner=False)
+def fetch_isy_fundamentals(ticker: str) -> Dict[str, object]:
+    """İş Yatırım üzerinden detaylı rasyo ve temel analiz verileri çeker."""
+    result = {
+        "pe_ratio": None, "pb_ratio": None, "fd_favok": None, "net_borc_favok": None,
+        "piotroski_score": 0, "isy_score": 0, "isy_grade": "-", "error": None,
+        "earnings_growth": None, "debt_growth": None
+    }
+    try:
+        import isyatirimhisse as isy
+        # Sembolü temizle (BIST hisseleri için .IS kısmını at)
+        clean_sym = ticker.replace(".IS", "")
+        
+        # Temel rasyoları çek (Güncel piyasa rasyoları)
+        # isyatirimhisse sürümüne göre fetch_data veya fetch_financials kullanılabilir
+        # Genelde fetch_data rasyolar için daha uygundur
+        try:
+            ratios = isy.fetch_data(symbol=clean_sym, exchange='TRY', freq='Y')
+            if not ratios.empty:
+                last_r = ratios.iloc[-1]
+                result["pe_ratio"] = _safe_get(last_r, "FK")
+                result["pb_ratio"] = _safe_get(last_r, "PDDD")
+                result["fd_favok"] = _safe_get(last_r, "FDFAVOK")
+        except:
+            pass
+
+        # Mali tablolar üzerinden Piotroski ve ekstra hesaplamalar
+        # Bu kısım fetch_yf_data içinde zaten bir ölçüde var ama buraya entegre edelim
+        financials = isy.fetch_financials(symbols=clean_sym)
+        if not financials.empty:
+            # Piotroski F-Score Hesapla (scoring.py içinde tanımlı)
+            from scoring import calculate_piotroski
+            f_score, _ = calculate_piotroski(financials)
+            result["piotroski_score"] = f_score
+            
+            # Basit bir İş Yatırım Temel Puanı (0-100)
+            isy_puan = (f_score / 9 * 60) # Piotroski %60 etkili
+            if result["pe_ratio"] and 0 < result["pe_ratio"] < 15: isy_puan += 20
+            if result["pb_ratio"] and 0 < result["pb_ratio"] < 3: isy_puan += 20
+            
+            result["isy_score"] = min(100, round(isy_puan))
+            if isy_puan >= 80: result["isy_grade"] = "💎 S (Şahane)"
+            elif isy_puan >= 60: result["isy_grade"] = "🥇 A (Pırlanta)"
+            elif isy_puan >= 45: result["isy_grade"] = "🥈 B (Sağlam)"
+            else: result["isy_grade"] = "⚠️ C (Riskli)"
+            
+            # Bilanço Radar Modeli (Earnings Surprise & Debt Reduction)
+            if len(financials.columns) >= 2:
+                try:
+                    c = financials.columns[0]
+                    p = financials.columns[1]
+                    
+                    net_inc_c = financials.loc["DÖNEM KARI (ZARARI)", c]
+                    net_inc_p = financials.loc["DÖNEM KARI (ZARARI)", p]
+                    
+                    if net_inc_p > 0:
+                        result["earnings_growth"] = (net_inc_c - net_inc_p) / net_inc_p
+                    elif net_inc_p <= 0 and net_inc_c > 0:
+                        result["earnings_growth"] = 10.0 # Huge turnaround
+                    
+                    debt_c = financials.loc["Kısa Vadeli Yükümlülükler", c] + financials.loc["Uzun Vadeli Yükümlülükler", c]
+                    debt_p = financials.loc["Kısa Vadeli Yükümlülükler", p] + financials.loc["Uzun Vadeli Yükümlülükler", p]
+                    
+                    if debt_p > 0:
+                        result["debt_growth"] = (debt_c - debt_p) / debt_p
+                except:
+                    pass
+            
+    except Exception as e:
+        result["error"] = str(e)
+    
+    return result
+
 @st.cache_data(ttl=3600, show_spinner=False)
 def fetch_quick_fundamentals(ticker: str, market: str = "NASDAQ") -> Dict[str, object]:
+    if market == "BIST":
+        return fetch_isy_fundamentals(ticker)
+        
     result = {
         "pe_ratio": None, "pb_ratio": None, "roe": None, "roa": None,
         "debt_to_equity": None, "current_ratio": None, "profit_margin": None,
         "revenue_growth": None, "earnings_growth": None, "dividend_yield": None,
         "market_cap": None, "beta": None, "fundamental_score": 0,
-        "fundamental_grade": "-", "error": None
+        "fundamental_grade": "-", "piotroski_score": None, "error": None
     }
     
     if market == "CRYPTO":
@@ -63,23 +139,50 @@ def fetch_quick_fundamentals(ticker: str, market: str = "NASDAQ") -> Dict[str, o
         result["market_cap"] = info.get("marketCap")
         result["beta"] = info.get("beta")
         
+        # Daha Kapsamlı Temel Analiz Puanlaması
         fund_score = 0
+        
+        # 1. Karlılık (ROE & ROA) - Max 30 Puan
         roe = result["roe"]
-        if roe: fund_score += 15 if roe > 0.20 else (10 if roe > 0.10 else 5)
+        if roe: fund_score += 20 if roe > 0.20 else (15 if roe > 0.12 else (10 if roe > 0.05 else 5))
+        roa = result["roa"]
+        if roa: fund_score += 10 if roa > 0.10 else (5 if roa > 0.04 else 0)
+        
+        # 2. Değerleme (P/E & P/B) - Max 30 Puan
         pe = result["pe_ratio"]
         if pe: 
-            if 0 < pe < 15: fund_score += 15
-            elif 15 <= pe < 30: fund_score += 10
-            elif pe < 0: fund_score -= 10
+            if 0 < pe < 12: fund_score += 20
+            elif 12 <= pe < 25: fund_score += 15
+            elif 25 <= pe < 40: fund_score += 8
+            elif pe < 0: fund_score -= 15 # Zarar eden şirket
+        pb = result["pb_ratio"]
+        if pb:
+            if 0 < pb < 1.5: fund_score += 10
+            elif 1.5 <= pb < 3.0: fund_score += 7
+            elif 3.0 <= pb < 6.0: fund_score += 3
+            
+        # 3. Finansal Sağlık (Debt/Equity & Current Ratio) - Max 20 Puan
         de = result["debt_to_equity"]
-        if de is not None: fund_score += 15 if de < 0.5 else (10 if de < 1.0 else 0)
+        if de is not None:
+            if de < 40: fund_score += 10 # yf bazen 100 bazında döner
+            elif de < 1.0: fund_score += 10
+            elif de < 1.5: fund_score += 5
+        cr = result["current_ratio"]
+        if cr: fund_score += 10 if cr > 1.5 else (5 if cr > 1.0 else 0)
         
-        fund_score = max(0, min(100, fund_score + 20))
-        result["fundamental_score"] = fund_score
+        # 4. Büyüme (Rev & Earn) - Max 20 Puan
+        rg = result["revenue_growth"]
+        if rg: fund_score += 10 if rg > 0.20 else (5 if rg > 0.10 else 0)
+        eg = result["earnings_growth"]
+        if eg: fund_score += 10 if eg > 0.30 else (5 if eg > 0.15 else 0)
         
-        if fund_score >= 70: result["fundamental_grade"] = "🏆 A (Mükemmel)"
-        elif fund_score >= 50: result["fundamental_grade"] = "🥇 B (İyi)"
-        elif fund_score >= 30: result["fundamental_grade"] = "🥈 C (Orta)"
+        # Temel Puanı ölçekle (Min 0, Max 100)
+        result["fundamental_score"] = max(0, min(100, fund_score))
+        
+        if result["fundamental_score"] >= 80: result["fundamental_grade"] = "💎 S (Şahane)"
+        elif result["fundamental_score"] >= 65: result["fundamental_grade"] = "🏆 A (Mükemmel)"
+        elif result["fundamental_score"] >= 50: result["fundamental_grade"] = "🥇 B (İyi)"
+        elif result["fundamental_score"] >= 35: result["fundamental_grade"] = "🥈 C (Orta)"
         else: result["fundamental_grade"] = "⚠️ D (Zayıf)"
         
     except Exception as e:

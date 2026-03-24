@@ -10,6 +10,5 @@ numba
 scikit-learn
 plotly
 git+https://github.com/rongardF/tvdatafeed.git
-selenium
-webdriver-manager
-pytesseract
+openai
+pytz

@@ -8,7 +8,8 @@ import time
 import os
 
 # Local imports
-from constants import DEFAULT_NASDAQ_HISSELER, DEFAULT_BIST_HISSELER, DEFAULT_CRYPTO_SYMBOLS, TIMEFRAME_OPTIONS
+from constants import DEFAULT_NASDAQ_HISSELER, DEFAULT_BIST_HISSELER, DEFAULT_CRYPTO_SYMBOLS, TIMEFRAME_OPTIONS, BIST_SECTORS
+import plotly.express as px
 from utils import send_telegram_message, uniq, clamp, _safe_get
 from indicators import add_indicators, calculate_price_targets
 from scoring import score_symbol, calculate_elite_score
@@ -47,9 +48,12 @@ def init_gui():
 
     st.sidebar.markdown("---")
     st.sidebar.subheader("📲 Bildirim & AI Ayarları")
-    telegram_token = st.sidebar.text_input("Telegram Bot Token", type="password", key="tg_token_input", value="")
-    telegram_chat_id = st.sidebar.text_input("Telegram Chat ID", key="tg_chat_id_input", value="1070470722")
-    openrouter_key = st.sidebar.text_input("OpenRouter API Key (AI Yorum)", type="password", key="or_key_input", value=os.environ.get("OPENROUTER_API_KEY", ""))
+    telegram_token = st.sidebar.text_input("Telegram Bot Token", type="password", key="tg_token_input", value=os.environ.get("TELEGRAM_BOT_TOKEN", "8336526803:AAEvg9b0P9Em5MSND9uCb9RfbTGXBHDGdAA"))
+    telegram_chat_id = st.sidebar.text_input("Telegram Chat ID", key="tg_chat_id_input", value=os.environ.get("TELEGRAM_CHAT_ID", "1070470722"))
+    if "or_key_input" not in st.session_state:
+        st.session_state.or_key_input = os.environ.get("OPENROUTER_API_KEY", "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")
+    
+    openrouter_key = st.session_state.or_key_input
 
     # Trend Analiz Butonu (SQLite entegrasyonu ile)
     if st.sidebar.button("💎 Yeni Elit Hisseleri Bul"):
@@ -102,7 +106,7 @@ def init_gui():
         with c3:
             workers = st.selectbox("⚡ Paralel Baglanti", options=[1, 2, 3, 4, 5], index=2)
         with c4:
-            only_buy = st.checkbox("Sadece AL", value=False)
+            signal_filter = st.selectbox("Sinyal Filtresi", ["Tümü", "Sadece AL", "Sadece ŞORT"], index=0)
 
         if st.button("Taramayi Baslat", type="primary"):
             df_res, err_res = run_scan(symbols, st.session_state.piyasa, tf_name, delay_ms, workers=workers)
@@ -114,56 +118,106 @@ def init_gui():
             save_scan_results(df_res, st.session_state.piyasa, tf_name)
 
             if st.session_state.get("tg_token_input") and st.session_state.get("tg_chat_id_input") and not df_res.empty:
-                buy_signals = df_res[df_res["Sinyal"] == "AL"]
-                if not buy_signals.empty:
-                    top_buys = buy_signals.sort_values(by="Kalite", ascending=False).head(5)
-                    msg = f"🚀 *TARAMA SONUÇLARI ({st.session_state.piyasa})*\n"
-                    for idx, row in top_buys.iterrows():
-                        msg += f"💎 *{row['Hisse']}* (Elite: {row.get('Elite Skor', 0)})\n   ➤ Aksiyon: {row['Aksiyon']}\n\n"
-                    send_telegram_message(telegram_token, telegram_chat_id, msg)
+                from reporting import format_telegram_message
+                msg = format_telegram_message(st.session_state.piyasa, df_res, "OPEN")
+                
+                # Opsiyonel: AI yorumu ekle (OpenRouter anahtarı varsa)
+                if st.session_state.get("or_key_input"):
+                    try:
+                        from github_scan_action import get_ai_commentary
+                        # or_key_input'u global os.environ'a geçici olarak set edelim ki get_ai_commentary kullansın
+                        os.environ["OPENROUTER_API_KEY"] = st.session_state.get("or_key_input")
+                        ai_msg = get_ai_commentary(st.session_state.piyasa, df_res)
+                        if ai_msg:
+                            msg += f"\n\n\U0001f9e0 *YAPAY ZEKA YORUMU:*\n{ai_msg}"
+                    except Exception as e:
+                        print(f"Streamlit AI Comment Error: {e}")
+                
+                send_telegram_message(telegram_token, telegram_chat_id, msg)
+                st.success("✅ Tarama sonuçları Telegram'a gönderildi!")
 
-        df = st.session_state.scan_df.copy()
-        if not df.empty:
-            if only_buy:
-                df = df[df["Sinyal"] == "AL"].copy()
             if not df.empty:
-                render_ui_results(df)
-                render_ai_assistant(df, st.session_state.get("or_key_input", ""))
-        else:
-            st.info("Tarama baslatildiginda sonuclar burada gorunecek.")
+                if signal_filter == "Sadece AL":
+                    df = df[df["Sinyal"] == "AL"].copy()
+                elif signal_filter == "Sadece ŞORT":
+                    df = df[df["Sinyal"] == "AÇIĞA SAT"].copy()
+                    
+                if not df.empty:
+                    render_ui_results(df, tf_name)
+                    render_ai_assistant(df, st.session_state.get("or_key_input", ""))
+        
+        # Tarama yapilmis ama su an aktif buton tiklanmamis durumlar icin (session state)
+        if not st.session_state.scan_df.empty:
+             df_cached = st.session_state.scan_df.copy()
+             
+             if signal_filter == "Sadece AL":
+                 df_cached = df_cached[df_cached["Sinyal"] == "AL"].copy()
+             elif signal_filter == "Sadece ŞORT":
+                 df_cached = df_cached[df_cached["Sinyal"] == "AÇIĞA SAT"].copy()
+             
+             if not df_cached.empty:
+                 # tf_name selectbox'tan geldigi icin locals() icinde olmali
+                 cur_tf = tf_name if 'tf_name' in locals() else "Günlük"
+                 render_ui_results(df_cached, cur_tf)
+                 render_ai_assistant(df_cached, st.session_state.get("or_key_input", ""))
+        elif "scan_df" in st.session_state and st.session_state.scan_df.empty:
+             st.info("Tarama başladığında sonuçlar burada görünecek.")
 
     with main_tab2:
         render_backtest_tab()
 
-def render_ui_results(df):
+def render_ui_results(df, tf_name):
     m1, m2, m3, m4 = st.columns(4)
     m1.metric("Toplam", len(df))
-    m2.metric("AL", int((df["Sinyal"] == "AL").sum()))
-    m3.metric("Ort Guven", round(float(df["Guven"].mean()), 1))
+    m2.metric("AL Sinyali", int((df["Sinyal"] == "AL").sum()))
+    m3.metric("AÇIĞA SAT", int((df["Sinyal"] == "AÇIĞA SAT").sum()))
     m4.metric("Ort Risk", round(float(df["Dusus Riski"].mean()), 1))
 
     st.markdown("---")
 
-    tab1, tab_elite, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
-        "⭐ Kalite Sirala", "💎 ELİT HİSSELER", "📉 Dip", "🚀 Breakout", 
-        "📈 Momentum", "💥 Hacim Patlaması", "🗜️ Bollinger Sıkışması", 
-        "📐 Konsolidasyon"
+    tab_uzun, tab_orta, tab_kisa, tab_elite, tab_weinstein, tab_minervini, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
+        "📅 Uzun Vade", "📅 Orta Vade", "📅 Kısa Vade", "💎 ELİT HİSSELER", 
+        "📈 Stan Weinstein", "🚀 Mark Minervini",
+        "📉 Dip", "🚀 Breakout", "📈 Momentum", "💥 Hacim Patlaması", 
+        "🗜️ Bollinger Sıkışması", "📐 Konsolidasyon"
     ])
 
-    with tab1:
-        render_scan_table(df, sort_col="Kalite")
+    with tab_uzun:
+        uzun_df = df[df["Vade"] == "Uzun"]
+        render_scan_table(uzun_df, sort_col="Kalite")
+    with tab_orta:
+        orta_df = df[df["Vade"] == "Orta"]
+        render_scan_table(orta_df, sort_col="Kalite")
+    with tab_kisa:
+        kisa_df = df[df["Vade"] == "Kısa"]
+        render_scan_table(kisa_df, sort_col="Kalite")
     with tab_elite:
         if "Elite Skor" in df.columns:
             elite_df = df.sort_values(by="Elite Skor", ascending=False)
             render_scan_table(elite_df, sort_col="Elite Skor")
         else:
             st.info("Elite veri yok.")
+    
+    with tab_weinstein:
+        st.subheader("Stan Weinstein - Aşama Analizi")
+        st.caption("Fiyatın 30 haftalık SMA üzerinde olduğu ve SMA'nın yukarı döndüğü (Aşama 2) hisseler.")
+        weinstein_df = df[df["Weinstein"] == "Aşama 2"].copy()
+        render_scan_table(weinstein_df, sort_col="Kalite")
+        
+    with tab_minervini:
+        st.subheader("Mark Minervini - Trend Template")
+        st.caption("Aşama 2 trendinde olan, SMA 50 > 150 > 200 dizilimini sağlayan kurumsal trend adayları.")
+        minervini_df = df[df["Trend Sablonu"] == "✅ GÜÇLÜ (MINERVINI)"].copy()
+        render_scan_table(minervini_df, sort_col="Kalite")
     with tab2: render_scan_table(df, sort_col="Dip Skor")
     with tab3: render_scan_table(df, sort_col="Breakout Skor")
     with tab4: render_scan_table(df, sort_col="Momentum Skor")
     with tab5: render_scan_table(df[df["Hacim Spike"] >= 2.0], sort_col="Hacim Spike")
     with tab6: render_scan_table(df[df["Daralma (Squeeze)"] == "🗜 İzlenir"], sort_col="Bollinger Genisligi")
     with tab7: render_scan_table(df, sort_col="Konsol Skor")
+
+    # Korelasyon ve Sektör Analizi (Alt Bölüm)
+    render_correlation_analysis(df, st.session_state.piyasa, tf_name)
 
 def render_ai_assistant(df: pd.DataFrame, api_key: str):
     st.markdown("---")
@@ -208,15 +262,91 @@ def render_ai_assistant(df: pd.DataFrame, api_key: str):
             except Exception as e:
                 st.error(f"Yapay zeka ile bağlantı kurulurken bir hata oluştu: {e}")
 
+def render_correlation_analysis(df, exchange, tf_name):
+    st.markdown("---")
+    st.subheader("🧩 Sepet & Karar Analizi")
+    st.info("Portföyünüzün risk dağılımını ve hisseler arasındaki hareket benzerliğini analiz edin.")
+    
+    # 1. Korelasyon Matrisi
+    st.write("📊 **Fiyat Hareket Benzerliği (Son 60 Gün)**")
+    
+    if df.empty:
+        st.warning("Analiz için veri bulunamadı.")
+        return
+
+    # Hangi hisseler analiz edilecek?
+    # En yüksek kalite puanlı ilk 10 hisseyi seç
+    top_stocks = df.sort_values(by="Kalite", ascending=False).head(10)["Hisse"].tolist()
+    
+    if len(top_stocks) < 2:
+        st.warning("Korelasyon analizi için en az 2 hisse gereklidir.")
+        return
+
+    if st.button("🧩 Korelasyon Analizini Başlat"):
+        from tvDatafeed import TvDatafeed
+        tv = TvDatafeed()
+        tf = TIMEFRAME_OPTIONS[tf_name]
+        
+        prices_dict = {}
+        with st.spinner("Geçmiş veriler çekiliyor (60 Bar)..."):
+            for sym in top_stocks:
+                try:
+                    raw = fetch_hist(tv, sym, "BINANCE" if exchange=="CRYPTO" else exchange, interval_obj(tf["base"]), 60)
+                    if raw is not None and not raw.empty:
+                        prices_dict[sym] = raw["close"]
+                except:
+                    continue
+        
+        if len(prices_dict) < 2:
+            st.error("Veri çekilemedi.")
+            return
+
+        df_prices = pd.DataFrame(prices_dict).dropna()
+        if df_prices.empty:
+            st.error("Korelasyon için yeterli ortak veri noktası yok.")
+            return
+            
+        corr_matrix = df_prices.pct_change().corr()
+        
+        fig = px.imshow(corr_matrix, 
+                        text_auto=True, 
+                        color_continuous_scale='RdBu_r', 
+                        aspect="auto",
+                        labels=dict(color="Korelasyon"),
+                        title="Hisseler Arası Hareket Benzerliği (-1 ile 1 arası)")
+        st.plotly_chart(fig, use_container_width=True)
+        
+        st.caption("💡 0.70 üzerindeki dege rler yüksek benzerlik gösterir. Riski dağıtmak için farklı sektörlerden ve düşük korelasyonlu hisseler seçmelisiniz.")
+    
+    # 2. Sektör Dağılımı (Sadece BIST için)
+    if exchange == "BIST" and not df.empty:
+        st.markdown("---")
+        st.write("🏢 **Sektör Yoğunlaşması (Top 15)**")
+        top_15 = df.head(15)["Hisse"].tolist()
+        sectors = [BIST_SECTORS.get(s, "Diğer") for s in top_15]
+        sec_counts = pd.Series(sectors).value_counts()
+        
+        fig_sec = px.pie(values=sec_counts.values, names=sec_counts.index, title="Sepetteki Sektör Dağılımı")
+        st.plotly_chart(fig_sec, use_container_width=True)
+
 def render_scan_table(input_df, sort_col="Kalite"):
     if input_df.empty:
         st.info("Sonuç yok.")
         return
     col_config = {
         "Hisse": st.column_config.TextColumn("📊 Hisse"),
+        "Vade": st.column_config.TextColumn("⏳ Vade"),
         "Elite Skor": st.column_config.ProgressColumn("💎 Elite", min_value=0, max_value=100),
         "Kalite": st.column_config.ProgressColumn("⭐ Kalite", min_value=0, max_value=100),
         "Sinyal": st.column_config.TextColumn("📡 Sinyal"),
+        "Weinstein": st.column_config.TextColumn("📈 Weinstein"),
+        "Trend Sablonu": st.column_config.TextColumn("🚀 Trend Şablonu"),
+        "Aksiyon": st.column_config.TextColumn("🎯 Aksiyon Planı"),
+        "pe_ratio": st.column_config.NumberColumn("💰 F/K", format="%.2f"),
+        "pb_ratio": st.column_config.NumberColumn("🏢 PD/DD", format="%.2f"),
+        "isy_score": st.column_config.ProgressColumn("💎 Temel Puan", min_value=0, max_value=100),
+        "isy_grade": st.column_config.TextColumn("📜 Temel Not"),
+        "piotroski_score": st.column_config.ProgressColumn("📊 F-Score", min_value=0, max_value=9),
     }
     display_df = input_df.sort_values(by=sort_col, ascending=False)
     st.dataframe(
@@ -252,6 +382,8 @@ def run_scan(symbols, exchange, tf_name, delay_ms, workers=1):
 
     def scan_one(sym, worker_id=0):
         try:
+            if delay_ms > 0:
+                time.sleep((delay_ms / 1000.0) + (worker_id * 0.1))
             base_raw = fetch_hist(tv, sym, tv_exchange, interval_obj(tf["base"]), tf["bars"])
             conf_raw = fetch_hist(tv, sym, tv_exchange, interval_obj(tf["confirm"]), tf["confirm_bars"])
             base, conf = add_indicators(base_raw), add_indicators(conf_raw)
@@ -270,6 +402,7 @@ def run_scan(symbols, exchange, tf_name, delay_ms, workers=1):
             
             res = {"Hisse": sym, "AI Tahmin": f"%{round(ai_prob,1)}", **s,
                    "Hacim Spike": round(float(_safe_get(last, "vol_spike", 0.0)), 2),
+                   "Bollinger Genisligi": round(float(_safe_get(last, "bb_width", 0.0)), 2),
                    "Daralma (Squeeze)": "🗜 İzlenir" if bool(_safe_get(last, "bb_squeeze", False)) else "-"}
             if targets: res.update(targets)
             return res

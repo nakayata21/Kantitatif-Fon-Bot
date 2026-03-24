@@ -180,6 +180,68 @@ def add_indicators(df: pd.DataFrame) -> pd.DataFrame:
 
     out["ut_buy"], out["ut_sell"], out["ut_pos"] = compute_ut_bot(out["close"], out["high"], out["low"], a=1.0, c=10)
 
+    # --- Mark Minervini Trend Template (Stage 2 Uptrend) ---
+    # Zaman dilimine göre pencere boyutlarını ayarla
+    is_weekly = len(out) < 250 # Haftalık veride genellikle 200 bar çekiyoruz
+    
+    m_sma150_win = 30 if is_weekly else 150
+    m_high_win = 52 if is_weekly else 252
+    m_rising_win = 4 if is_weekly else 20
+    
+    out["sma150"] = ta.trend.SMAIndicator(close=out["close"], window=m_sma150_win, fillna=True).sma_indicator()
+    out["low_52w"] = out["low"].rolling(window=m_high_win, min_periods=min(10, m_high_win)).min()
+    out["high_52w"] = out["high"].rolling(window=m_high_win, min_periods=min(10, m_high_win)).max()
+    
+    # 200 Günlük MA'nın yükseliyor olması (Haftalıkta SMA30 veya SMA50'ye bakılabilir ama şablon gereği sma200'e bakıyoruz)
+    # Eğer haftalık veriysek sma200 muhtemelen NaN'dır, o yüzden sma200_rising'i güvenli hesapla
+    if "sma200" in out.columns and not out["sma200"].isnull().all():
+        out["sma200_rising"] = out["sma200"] > out["sma200"].shift(m_rising_win)
+    else:
+        out["sma200_rising"] = True # Veri yoksa kısıtlama yapma
+    
+    # Minervini 8-Step Verification
+    m1 = (out["close"] > out["sma150"])
+    if "sma200" in out.columns and not out["sma200"].isnull().all():
+        m1 &= (out["close"] > out["sma200"])
+        m2 = out["sma150"] > out["sma200"]
+    else:
+        m2 = True # sma200 yoksa bu kuralı atla
+        
+    m3 = out["sma200_rising"]
+    m4 = (out["sma50"] > out["sma150"])
+    if "sma200" in out.columns and not out["sma200"].isnull().all():
+        m4 &= (out["sma50"] > out["sma200"])
+        
+    m5 = out["close"] > out["sma50"]
+    m6 = out["close"] > (out["low_52w"] * 1.25) # %30 yerine %25 yaparak esnettik
+    m7 = out["close"] > (out["high_52w"] * 0.70) # %25 yerine %30 esnekliği
+    
+    out["minervini_template"] = m1 & m2 & m3 & m4 & m5 & m6 & m7
+
+    # --- Stan Weinstein Stage Analysis (Haftalık Bazda Daha Doğru Çalışır) ---
+    out["sma30_w"] = ta.trend.SMAIndicator(close=out["close"], window=30, fillna=True).sma_indicator()
+    out["sma30_w_slope"] = out["sma30_w"].pct_change(5)
+    out["vol_ma4_w"] = out["volume"].rolling(4).mean()
+    
+    # Weinstein Stage identification (Haftalık veri olduğu varsayımıyla)
+    def identify_weinstein_stage(row):
+        close = row["close"]
+        sma30 = row["sma30_w"]
+        slope = row["sma30_w_slope"]
+        
+        if close > sma30:
+            if slope > 0:
+                return 2  # Stage 2: Advancing (Trend)
+            else:
+                return 1  # Stage 1: Basing (Accumulation)
+        else:
+            if slope < 0:
+                return 4  # Stage 4: Declining (Meltdown)
+            else:
+                return 3  # Stage 3: Topping (Distribution)
+                
+    out["weinstein_stage"] = out.apply(identify_weinstein_stage, axis=1)
+
     return out
 
 def calculate_price_targets(base_df: pd.DataFrame) -> Optional[dict]:

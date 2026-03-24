@@ -10,10 +10,10 @@ TR_TZ = pytz.timezone("Europe/Istanbul")
 
 # GitHub Secrets'ten okuyacağız, veya varsayılanları kullanacağız.
 # Güvenlik uyarısı: Hardcoded tokenlar kaldırıldı. GitHub Secrets üzerinden yönetilmelidir.
-TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
-CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
+TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "8336526803:AAEvg9b0P9Em5MSND9uCb9RfbTGXBHDGdAA")
+CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "1070470722")
 MARKET = os.environ.get("TARGET_MARKET", "BIST")
-OPENROUTER_API_KEY = os.environ.get("OPENROUTER_API_KEY")
+OPENROUTER_API_KEY = os.environ.get("OPENROUTER_API_KEY", "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")
 
 def get_market_status(market="BIST"):
     """Piyasa durumunu kontrol eder: OPEN, PRE_MARKET, CLOSED"""
@@ -64,55 +64,7 @@ def send_msg(text):
     except Exception as e:
         print(f"❌ Telegram Bağlantı Hatası: {str(e)}")
 
-def format_telegram_message(market, df_res, status):
-    if df_res.empty: return f"❌ {market} piyasasında fırsat bulunamadı."
-    buy_signals = df_res[df_res["Sinyal"] == "AL"]
-    if buy_signals.empty: return f"❌ {market} piyasasında onaylı işlem setup'ı oluşmadı."
-    
-    # En iyi 5
-    top_buys = buy_signals.sort_values(by="Kalite", ascending=False).head(5)
-    status_text = "🟢 Piyasa Açık (Canlı)" if status == "OPEN" else "🕒 Piyasa Kapalı/Açılmak Üzere"
-    
-    msg = f"🛰️ *{market} QUANT DECISION ENGINE* ({datetime.now(TR_TZ).strftime('%H:%M')})\n"
-    msg += f"⏱ Durum: {status_text}\n\n"
-    
-    for idx, row in top_buys.iterrows():
-        engine = row.get('Engine', 'SAFE')
-        decision = row.get('Decision', 'NO TRADE')
-        
-        # Engine Label
-        if engine == "OPPORTUNITY": 
-            engine_str = "⚡ OPPORTUNITY ENGINE DETECTED"
-        else:
-            engine_str = "🛡️ SAFE ENGINE DETECTED"
-            
-        msg += f"{engine_str} | *{row['Hisse']}*\n"
-        msg += f"━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-        msg += f"🎯 *Decision:* {decision}\n"
-        msg += f"📊 *Setup Puanı:* {row.get('Skor', 0)}/100 | *Trade Puanı:* {row.get('Kalite', 0)}/100\n"
-        msg += f"🔥 *Setup Stratejisi:* {row.get('Aksiyon', '-')}\n\n"
-        
-        # Ek Metrikler
-        msg += f"📈 *Gerekçe/Metrikler:*\n"
-        vol_s = row.get('Hacim Spike', 0.0)
-        msg += f"   ➤ Hacim Gücü: x{vol_s} {'🔥 Patlama' if vol_s >= 2 else ''}\n"
-        msg += f"   ➤ Ozel Durumlar: {row.get('Özel Durum', '-')}\n"
-        msg += f"   ➤ Likidite Eşiği: {row.get('Likidite', 'Geçti')}\n\n"
-        
-        # Trade Decision (Fiyatlar ve Risk) 
-        msg += f"💼 *TRADE PLANI (R/R: 1:{row.get('R/R', 0)})*\n"
-        msg += f"   ➤ Giriş: {row.get('Fiyat', 0)}\n"
-        msg += f"   ➤ Stop Loss: {row.get('Stop Loss', 0)} (%{row.get('Stop %', 0)})\n"
-        
-        tp1, tp2, tp3 = row.get('Hedef 1', 0), row.get('Hedef 2', 0), row.get('Hedef 3', 0)
-        if tp1 > 0:
-            msg += f"   ➤ TP 1 (%50 Çıkış): {tp1} (+%{row.get('Hedef 1 %', 0)})\n"
-            msg += f"   ➤ TP 2: {tp2} (+%{row.get('Hedef 2 %', 0)})\n"
-            msg += f"   ➤ TP 3 (Runner): {tp3} (+%{row.get('Hedef 3 %', 0)})\n"
-            
-        msg += "\n"
-        
-    return msg
+from reporting import format_telegram_message, TR_TZ
 
 def get_ai_commentary(market, df_res):
     """OpenRouter üzerinden AI yorumu alır."""
@@ -121,14 +73,16 @@ def get_ai_commentary(market, df_res):
         return None
     
     buy_signals = df_res[df_res["Sinyal"] == "AL"]
-    if buy_signals.empty:
-        return None
-    
-    top_buys = buy_signals.sort_values(by="Kalite", ascending=False).head(5)
+    if not buy_signals.empty:
+        top_stocks = buy_signals.sort_values(by="Kalite", ascending=False).head(5)
+        title = "onaylı AL veren en iyi 5 hisse"
+    else:
+        top_stocks = df_res.sort_values(by="Kalite", ascending=False).head(5)
+        title = "şu an onaylı AL vermese de en yüksek kalite puanına sahip 5 hisse"
     
     # Tarama verilerini AI'ya gönderilecek metin formatına çevir
     stock_data = ""
-    for idx, row in top_buys.iterrows():
+    for idx, row in top_stocks.iterrows():
         stock_data += f"Hisse: {row['Hisse']}\n"
         stock_data += f"  Kalite Skoru: {row['Kalite']}\n"
         stock_data += f"  Sinyal: {row['Sinyal']} | Aksiyon: {row['Aksiyon']}\n"
@@ -138,7 +92,7 @@ def get_ai_commentary(market, df_res):
         stock_data += f"  AI Tahmin: {row.get('AI Tahmin', '-')}\n"
         stock_data += f"  Özel Durum: {row.get('Özel Durum', '-')}\n\n"
     
-    prompt = f"""Aşağıda {market} piyasasından taranan en iyi 5 hissenin verileri var:
+    prompt = f"""Aşağıda {market} piyasasından taranan {title} verileri var:
 {stock_data}
 
 Bu verileri teknik terim kullanmadan, sanki borsa ile hiç ilgilenmemiş birine durumu özetler gibi her hisse için 1 kısa cümlede anlat. 
@@ -195,18 +149,27 @@ if __name__ == "__main__":
             symbols = DEFAULT_BIST_HISSELER # Fallback
             
         try:
-            # run_scan'daki gui=False argümanı kaldırıldı (Otomatik algılıyor)
-            df, errs = run_scan(symbols, MARKET, "Gunluk", delay_ms=500, workers=5)
+            # GitHub (TradingView) rate limit sorunları için worker sayısını ve bekleme süresini optimize et.
+            workers_count = 1 if MARKET in ["BIST", "NASDAQ"] else 2
+            df, errs = run_scan(symbols, MARKET, "Gunluk", delay_ms=1000, workers=workers_count)
+            print(f"DEBUG: Tarama bitti. Basarili: {len(df)}, Hata: {len(errs)}")
+            
             message = format_telegram_message(MARKET, df, status)
             
-            # Yapay Zeka Yorumu Ekle
-            if not df.empty:
+            # Eger tarama yapildiysa ama sinyal yoksa veya hata coksa bilgi ekle
+            if len(df) == 0 and len(errs) > 0:
+                message = f"🛑 *{MARKET} Tarama Hatası*\nVeri çekilemedi. Toplam {len(errs)} hata oluştu. GitHub IP engeli olabilir."
+            elif not df.empty:
+                # Yapay Zeka Yorumu Ekle
                 ai_comment = get_ai_commentary(MARKET, df)
                 if ai_comment:
                     message += f"\n\n\U0001f9e0 *YAPAY ZEKA YORUMU:*\n{ai_comment}"
+                
+                # Ozet bilgisi ekle
+                message += f"\n\n📊 *Tarama Özeti:*\n- Toplam Sembol: {len(symbols)}\n- Başarılı: {len(df)}\n- Hata: {len(errs)}\n- Sinyal: {int((df['Sinyal'] == 'AL').sum()) if 'Sinyal' in df.columns else 0}"
             
             send_msg(message)
-            print(f"[{datetime.now(TR_TZ)}] İşlem Başarıyla Tamamlandı. Mesaj Gönderildi!")
+            print(f"[{datetime.now(TR_TZ)}] İşlem Tamamlandı. Mesaj Gönderildi!")
             os._exit(0)
         except Exception as e:
             error_msg = f"\U0001f534 GİTHUB ACTION TARAMA HATASI ({MARKET}): {str(e)}"
