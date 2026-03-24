@@ -443,18 +443,35 @@ def score_symbol(last: pd.Series, prev: pd.Series, conf_last: pd.Series, market:
     # Kalite puanı artık riske daha duyarlı
     kalite = (general * 0.6) + (confidence * 0.4) - (risk * 0.4)
     
-    # Overextension Cezası
+    # Overextension Cezası (Yakın ve Uzak Vade Şişme Kontrolü)
     overextend_penalty = 1.0
     overextend_reasons = []
-    if ema20_dist > 8.0:
+    
+    # 1 Yıllık ve 3 Aylık Zirve Şişme Kontrolü
+    sma200_dist = ((close_val - sma200_val) / sma200_val) * 100 if sma200_val > 0 else 0.0
+    sma50_dist = ((close_val - sma50_val) / sma50_val) * 100 if sma50_val > 0 else 0.0
+    
+    if sma200_dist > 80.0:
+        overextend_penalty *= 0.3 # 1 Yılda %80'den fazla kopmuşsa büyük ceza (Tepe riski)
+        overextend_reasons.append("⚠️ Yıllık Ralli (Şişik)")
+    elif sma200_dist > 50.0:
+        overextend_penalty *= 0.6
+        overextend_reasons.append("⚠️ Uzun Vade Şişik")
+        
+    if sma50_dist > 35.0:
+        overextend_penalty *= 0.5 # 3 Ayda çok dik çıkmışsa ceza
+        overextend_reasons.append("⚠️ 3 Aylık Dik Çıkış")
+        
+    # Kısa Vade Şişme Kontrolü
+    if ema20_dist > 10.0:
         overextend_penalty *= 0.4
-        overextend_reasons.append("⚠️ EMA20'den Çok Uzak")
+        overextend_reasons.append("⚠️ Ortalamadan Uzak (EMA20)")
     if rsi_val >= 78:
-        overextend_penalty *= 0.5
+        overextend_penalty *= 0.4
         overextend_reasons.append("🔴 RSI Aşırı Alım")
-    if roc20 > 25.0:
+    if roc20 > 30.0:
         overextend_penalty *= 0.5
-        overextend_reasons.append("🚀 Fiyat Balon Riski")
+        overextend_reasons.append("🚀 Aylık Balon Riski")
     
     kalite *= overextend_penalty
     
