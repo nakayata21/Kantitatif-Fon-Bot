@@ -88,8 +88,54 @@ def fetch_isy_fundamentals(ticker: str) -> Dict[str, object]:
     
     return result
 
-@st.cache_data(ttl=3600, show_spinner=False)
+FUND_CACHE_FILE = ".fund_cache.json"
+
+def get_cached_fund(ticker: str, market: str) -> Dict[str, object]:
+    import json, os
+    from datetime import date
+    today_str = date.today().isoformat()
+    cache = {}
+    
+    # Cache Dosyasını Oku
+    if os.path.exists(FUND_CACHE_FILE):
+        try:
+            with open(FUND_CACHE_FILE, "r") as f:
+                cache = json.load(f)
+            if cache.get("_date") != today_str:
+                cache = {"_date": today_str}
+        except:
+            cache = {"_date": today_str}
+    else:
+        cache = {"_date": today_str}
+        
+    cache_key = f"{market}:{ticker}"
+    if cache_key in cache:
+        return cache[cache_key]
+        
+    # Cache'de yoksa internetten çek
+    res = _fetch_quick_fundamentals_real(ticker, market)
+    
+    # Ancak hata veya boş veri varsa cache'leme, yarına kadar bloke etmemiş oluruz
+    if not res.get("error"):
+        cache[cache_key] = res
+        try:
+            import tempfile, shutil
+            # Atomic save with temp file to avoid corruption during parallel scans
+            fd, tmp_path = tempfile.mkstemp()
+            with os.fdopen(fd, "w") as f:
+                json.dump(cache, f)
+            shutil.move(tmp_path, FUND_CACHE_FILE)
+        except:
+            pass
+            
+    return res
+
+@st.cache_data(ttl=3600*24, show_spinner=False)
 def fetch_quick_fundamentals(ticker: str, market: str = "NASDAQ") -> Dict[str, object]:
+    """Sıcak ve kalıcı önbellekleme özellikli temel veri çekici"""
+    return get_cached_fund(ticker, market)
+
+def _fetch_quick_fundamentals_real(ticker: str, market: str = "NASDAQ") -> Dict[str, object]:
     if market == "BIST":
         return fetch_isy_fundamentals(ticker)
         
@@ -281,12 +327,46 @@ def fetch_hist(tv, symbol: str, exchange: str, interval, bars: int, retries: int
     for i in range(retries):
         try:
             d = tv.get_hist(symbol=symbol, exchange=exchange, interval=interval, n_bars=bars)
-            if d is not None and not d.empty:
+            if d is not None and not len(d) == 0:
                 return d
             last_err = RuntimeError(f"API bos DataFrame dondu (deneme {i+1}/{retries})")
         except Exception as e:
             last_err = RuntimeError(f"{type(e).__name__}: {e} (deneme {i+1}/{retries})")
-        time.sleep((1.0 * (2 ** i)) + random.uniform(0.2, 0.8))
+        
+        # Exponential backoff + random jitter for rate limits
+        time.sleep((1.5 * (2 ** i)) + random.uniform(0.5, 1.5))
+        
+    # YFINANCE FALLBACK
+    try:
+        import yfinance as yf
+        from tvDatafeed import Interval
+        
+        yf_sym = f"{symbol}.IS" if exchange == "BIST" else symbol
+        if exchange == "BINANCE": yf_sym = f"{symbol}"
+        
+        yf_int = "1d"
+        if interval == Interval.in_weekly: yf_int = "1wk"
+        elif interval == Interval.in_monthly: yf_int = "1mo"
+        
+        # Determine period based on bars and interval
+        period = "1y"
+        if bars > 250: period = "2y"
+        if bars > 500: period = "5y"
+        
+        tk = yf.Ticker(yf_sym)
+        df_yf = tk.history(period=period, interval=yf_int)
+        
+        if df_yf is not None and not df_yf.empty:
+            df_yf = df_yf.tail(bars)
+            df_yf = df_yf.rename(columns=str.lower)
+            if "stock splits" in df_yf.columns: df_yf = df_yf.drop(columns=["stock splits", "dividends"], errors="ignore")
+            df_yf.index.name = "datetime"
+            df_yf["symbol"] = f"{exchange}:{symbol}"
+            # print(f"⚠️ {symbol} için tvDatafeed başarısız, veriler yfinance'den çekildi.")
+            return df_yf
+    except Exception as e:
+        last_err = RuntimeError(f"tvDatafeed ve yfinance fallback başarısız: {e}")
+        
     raise last_err
 
 def check_index_health(tv, exchange: str, tf_name: str) -> bool:
