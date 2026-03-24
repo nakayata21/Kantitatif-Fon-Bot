@@ -136,15 +136,16 @@ def init_gui():
                 send_telegram_message(telegram_token, telegram_chat_id, msg)
                 st.success("✅ Tarama sonuçları Telegram'a gönderildi!")
 
-            if not df.empty:
+            if not df_res.empty:
+                df_to_show = df_res.copy()
                 if signal_filter == "Sadece AL":
-                    df = df[df["Sinyal"] == "AL"].copy()
+                    df_to_show = df_to_show[df_to_show["Sinyal"] == "AL"].copy()
                 elif signal_filter == "Sadece ŞORT":
-                    df = df[df["Sinyal"] == "AÇIĞA SAT"].copy()
+                    df_to_show = df_to_show[df_to_show["Sinyal"] == "AÇIĞA SAT"].copy()
                     
-                if not df.empty:
-                    render_ui_results(df, tf_name)
-                    render_ai_assistant(df, st.session_state.get("or_key_input", ""))
+                if not df_to_show.empty:
+                    render_ui_results(df_to_show, tf_name)
+                    render_ai_assistant(df_to_show, st.session_state.get("or_key_input", ""))
         
         # Tarama yapilmis ama su an aktif buton tiklanmamis durumlar icin (session state)
         if not st.session_state.scan_df.empty:
@@ -347,6 +348,8 @@ def render_scan_table(input_df, sort_col="Kalite"):
         "isy_score": st.column_config.ProgressColumn("💎 Temel Puan", min_value=0, max_value=100),
         "isy_grade": st.column_config.TextColumn("📜 Temel Not"),
         "piotroski_score": st.column_config.ProgressColumn("📊 F-Score", min_value=0, max_value=9),
+        "has_bullish_div": st.column_config.CheckboxColumn("🐂 Boğa Uyumsuzluğu"),
+        "div_msg": st.column_config.TextColumn("Uyumsuzluk Notu"),
     }
     display_df = input_df.sort_values(by=sort_col, ascending=False)
     st.dataframe(
@@ -356,7 +359,9 @@ def render_scan_table(input_df, sort_col="Kalite"):
 
 def run_scan(symbols, exchange, tf_name, delay_ms, workers=1):
     from tvDatafeed import TvDatafeed
+    from divergence import DivergenceEngine
     tv = TvDatafeed()
+    div_engine = DivergenceEngine()
     tf = TIMEFRAME_OPTIONS[tf_name]
     ai_model, ai_features = get_ai_model(exchange, tf_name, _tv=tv)
     index_healthy = check_index_health(tv, exchange, tf_name)
@@ -391,7 +396,16 @@ def run_scan(symbols, exchange, tf_name, delay_ms, workers=1):
             vc = conf.dropna(subset=["close", "macd_hist"])
             if vb.empty or vc.empty: return {"_err": f"{sym}: Veri yok"}
 
-            last, prev, conf_last = vb.iloc[-1], vb.iloc[-2] if len(vb)>1 else vb.iloc[-1], vc.iloc[-1]
+            # Divergence Analysis
+            candles = base_raw[["open", "high", "low", "close", "volume"]].dropna().to_dict("records")
+            div_res_data = div_engine.analyze(candles)
+            has_bullish_div = (div_res_data["summary"]["bias"] == "bullish")
+            div_msg = div_res_data["summary"].get("ai_hint", "")
+
+            last, prev, conf_last = vb.iloc[-1].copy(), vb.iloc[-2] if len(vb)>1 else vb.iloc[-1].copy(), vc.iloc[-1]
+            last["has_bullish_div"] = has_bullish_div
+            last["div_msg"] = div_msg
+            
             s = score_symbol(last, prev, conf_last, exchange, index_healthy)
             targets = calculate_price_targets(vb)
             
@@ -403,7 +417,9 @@ def run_scan(symbols, exchange, tf_name, delay_ms, workers=1):
             res = {"Hisse": sym, "AI Tahmin": f"%{round(ai_prob,1)}", **s,
                    "Hacim Spike": round(float(_safe_get(last, "vol_spike", 0.0)), 2),
                    "Bollinger Genisligi": round(float(_safe_get(last, "bb_width", 0.0)), 2),
-                   "Daralma (Squeeze)": "🗜 İzlenir" if bool(_safe_get(last, "bb_squeeze", False)) else "-"}
+                   "Daralma (Squeeze)": "🗜 İzlenir" if bool(_safe_get(last, "bb_squeeze", False)) else "-",
+                   "has_bullish_div": has_bullish_div,
+                   "div_msg": div_msg}
             if targets: res.update(targets)
             return res
         except Exception as e: return {"_err": f"{sym}: {e}"}

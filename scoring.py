@@ -515,6 +515,12 @@ def score_symbol(last: pd.Series, prev: pd.Series, conf_last: pd.Series, market:
     if is_ut_strong: 
         durumlar.append("🤖 GÜÇLÜ UT BOT AL")
         kalite += 5 # Ekstra güven puanı
+        
+    has_bullish_div = bool(_safe_get(last, "has_bullish_div", False))
+    if has_bullish_div:
+        durumlar.append("🐂 POZİTİF UYUMSUZLUK (GÜÇLÜ BOĞA)")
+        dip += 15
+        kalite += 5 # Uyumsuzluk güven puanı
     
     return {
         "Vade": vade, "Kalite": round(kalite,1), "Günlük %": f"%{round(daily_return,2)}",

@@ -70,4 +70,14 @@ def format_telegram_message(market, df_res, status):
                 msg += f"👉 *{row['Hisse']}* | Puan: {row['Kalite']}/100 | Hedef 1: {row.get('Hedef 1', '-')}\n"
             msg += "\n"
             
+    # Pozitif Uyumsuzluk Sinyalleri
+    if "has_bullish_div" in df_res.columns:
+        div_signals = df_res[df_res["has_bullish_div"] == True]
+        if not div_signals.empty:
+            msg += "🐂 *POZİTİF UYUMSUZLUK (Fiyat Düşerken Gösterge Yükseliyor)*\n"
+            div_stocks = div_signals.sort_values(by="Kalite", ascending=False).head(5)
+            for _, row in div_stocks.iterrows():
+                msg += f"👉 *{row['Hisse']}* | Puan: {row['Kalite']}/100\n"
+            msg += "\n"
+            
     return msg
