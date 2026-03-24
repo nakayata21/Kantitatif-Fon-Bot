@@ -117,13 +117,6 @@ def add_indicators(df: pd.DataFrame) -> pd.DataFrame:
     out["obv"] = ta.volume.OnBalanceVolumeIndicator(close=out["close"], volume=out["volume"], fillna=True).on_balance_volume()
     out["mfi"] = ta.volume.MFIIndicator(high=out["high"], low=out["low"], close=out["close"], volume=out["volume"], window=14, fillna=True).money_flow_index()
     
-    price_falling = out["close"] < out["close"].shift(1)
-    rsi_rising    = out["rsi"] > out["rsi"].shift(1)
-    out["pos_div"] = (price_falling & rsi_rising & (out["rsi"] < 40))
-    
-    price_rising = out["close"] > out["close"].shift(1)
-    rsi_falling  = out["rsi"] < out["rsi"].shift(1)
-    out["neg_div"] = (price_rising & rsi_falling & (out["rsi"] > 60))
 
     out["close_vs_sma50"] = ((out["close"] - out["sma50"]) / out["sma50"].replace(0, math.nan)) * 100
     out["close_vs_sma200"] = ((out["close"] - out["sma200"]) / out["sma200"].replace(0, math.nan)) * 100
