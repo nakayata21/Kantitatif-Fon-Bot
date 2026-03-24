@@ -43,6 +43,7 @@ def set_bot_commands():
         {"command": "crypto", "description": "Son CRYPTO Taramasını Getir"},
         {"command": "tara_bist", "description": "Canlı BIST Taraması Başlat"},
         {"command": "tara_crypto", "description": "Canlı CRYPTO Taraması Başlat"},
+        {"command": "analiz", "description": "Tek hisse analizi (ör: /analiz THYAO)"},
         {"command": "github", "description": "GitHub Bulut Taraması Tetikle"}
     ]
     try:
@@ -441,6 +442,14 @@ def polling_loop():
                                 threading.Thread(target=perform_scan, args=("CRYPTO",), daemon=True).start()
                             elif text == "/github":
                                 trigger_github_action(chat_id)
+                            elif text.startswith("/analiz"):
+                                parts = text.split()
+                                if len(parts) >= 2:
+                                    sym = parts[1].upper()
+                                    send_msg(chat_id, f"🔍 *{sym}* analiz ediliyor...")
+                                    threading.Thread(target=analyze_single_stock, args=(chat_id, sym), daemon=True).start()
+                                else:
+                                    send_msg(chat_id, "⚠️ Kullanım: /analiz THYAO")
                             else:
                                 # Hisse sembolü mü kontrol et (eski logic)
                                 text_upper = text.upper().replace("/", "").replace("$", "")

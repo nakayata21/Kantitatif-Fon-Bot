@@ -117,6 +117,12 @@ def add_indicators(df: pd.DataFrame, index_df: pd.DataFrame = None) -> pd.DataFr
     out["obv"] = ta.volume.OnBalanceVolumeIndicator(close=out["close"], volume=out["volume"], fillna=True).on_balance_volume()
     out["mfi"] = ta.volume.MFIIndicator(high=out["high"], low=out["low"], close=out["close"], volume=out["volume"], window=14, fillna=True).money_flow_index()
     
+    # Anchored VWAP (Son dibin oluştuğu bardan itibaren)
+    typical_price = (out["high"] + out["low"] + out["close"]) / 3
+    tp_vol = typical_price * out["volume"]
+    # Rolling 50-bar VWAP (kurumsal maliyet eğrisi)
+    out["vwap"] = tp_vol.rolling(50).sum() / out["volume"].rolling(50).sum().replace(0, math.nan)
+    out["above_vwap"] = out["close"] > out["vwap"]
 
     out["close_vs_sma50"] = ((out["close"] - out["sma50"]) / out["sma50"].replace(0, math.nan)) * 100
     out["close_vs_sma200"] = ((out["close"] - out["sma200"]) / out["sma200"].replace(0, math.nan)) * 100

@@ -198,13 +198,29 @@ def calculate_elite_score(technical: Dict, fundamental: Dict) -> Dict[str, objec
     }
 
 def score_symbol(last: pd.Series, prev: pd.Series, conf_last: pd.Series, market: str = "NASDAQ", index_healthy: bool = True) -> Dict[str, object]:
-    # MTF ve Rejim Kontrolü
+    # MTF ve Rejim Kontrolü (ENHANCED)
+    conf_ema20 = float(_safe_get(conf_last, "ema20", 0))
+    conf_ema50 = float(_safe_get(conf_last, "ema50", 0))
+    conf_sma50 = float(_safe_get(conf_last, "sma50", 0))
+    conf_close = float(_safe_get(conf_last, "close", 0))
+    conf_macd  = float(_safe_get(conf_last, "macd_hist", 0))
+    conf_rsi   = float(_safe_get(conf_last, "rsi", 50))
+    conf_ema_slope = float(_safe_get(conf_last, "ema20_slope", 0))
+    
     if market == "CRYPTO":
-        mtf_ok = bool(_safe_get(conf_last, "macd_hist", 0) > 0)
+        mtf_ok = bool(conf_macd > 0)
         regime_ok = bool((_safe_get(last, "adx", 0) >= 15) and (0.3 <= _safe_get(last, "atr_pct", 0) <= 20.0))
     else:
-        mtf_ok = bool(_safe_get(conf_last, "ema20", 0) > _safe_get(conf_last, "ema50", 0) and _safe_get(conf_last, "macd_hist", 0) > 0)
+        mtf_ok = bool(conf_ema20 > conf_ema50 and conf_macd > 0)
         regime_ok = bool((_safe_get(last, "adx", 0) >= 18) and (0.8 <= _safe_get(last, "atr_pct", 0) <= 10.0))
+    
+    # Mükemmel Fırtına: Haftalıkta trend BOĞA, RSI ılımlı ve EMA slope yukarı
+    mtf_perfect_storm = (
+        mtf_ok and 
+        (conf_close > conf_sma50) and 
+        (40 <= conf_rsi <= 70) and 
+        (conf_ema_slope > 0)
+    )
 
     vol_spike_val = float(_safe_get(last, "vol_spike", 0.0))
     ema20_slope   = float(_safe_get(last, "ema20_slope", 0.0))
@@ -325,6 +341,7 @@ def score_symbol(last: pd.Series, prev: pd.Series, conf_last: pd.Series, market:
     momentum = clamp(momentum)
 
     # 5. SMART MONEY VE PARA AKIŞI
+    above_vwap = bool(_safe_get(last, "above_vwap", False))
     smart_money = 0.0
     if market == "CRYPTO":
         smart_money += 25 if (daily_return > 3.0 and vol_spike_val >= 1.8 and close_val > prev_close) else 0
@@ -332,6 +349,7 @@ def score_symbol(last: pd.Series, prev: pd.Series, conf_last: pd.Series, market:
         smart_money += 25 if inst_bar else 0
     smart_money += 20 if ut_buy else 0
     smart_money += 15 if (vol_spike_val >= 2.0) else (10 if vol_spike_val >= 1.5 else 0)
+    smart_money += 15 if above_vwap else -10  # VWAP üstünde = kurumsal destek
     smart_money += 10 if _safe_get(last, "higher_lows_5", False) else 0
     
     mfi_val = float(_safe_get(last, "mfi", 50.0))
@@ -533,6 +551,10 @@ def score_symbol(last: pd.Series, prev: pd.Series, conf_last: pd.Series, market:
     if w_msg: durumlar.append(w_msg)
     if is_minervini: durumlar.append("🚀 MINERVINI TREND TEMPLATE")
     if mansfield_rs > 0.5: durumlar.append(f"👑 ENDEKS LİDERİ (RS: {round(mansfield_rs, 1)})")
+    if mtf_perfect_storm:
+        durumlar.append("⛈️ MÜKEMMEL FIRTINA (Günlük+Haftalık Uyum)")
+        kalite += 10
+    if above_vwap: durumlar.append("🏦 VWAP ÜZERİNDE (Kurumsal Destek)")
 
     # UT Bot & Divergence Fusion (ULTIMATE SIGNAL)
     is_ut_strong = ut_buy and (close_val > ema20_val) and (rsi_val > 50) and (macd_curr > -0.5)
