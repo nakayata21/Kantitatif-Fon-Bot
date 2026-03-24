@@ -88,22 +88,24 @@ def format_telegram_message(market, df_res, status):
             
             msg += "\n"
             
-    # Güçlü UT Bot Sinyalleri
+    # Güçlü UT Bot Sinyalleri (Sadece Tek Başına Olanlar)
     if "UT_Bot_Al" in df_res.columns:
-        ut_signals = df_res[df_res["UT_Bot_Al"] == True]
-        if not ut_signals.empty:
-            msg += "🤖 *GÜÇLÜ UT BOT YAKALAMALARI (Momentum + Trend Onaylı)*\n"
-            ut_stocks = ut_signals.sort_values(by="Kalite", ascending=False).head(5)
+        # ULTIMATE olmayan, sadece UT Bot AL verenler
+        ut_only = df_res[(df_res["UT_Bot_Al"] == True) & (df_res.get("UT_Plus_Div", False) == False)]
+        if not ut_only.empty:
+            msg += "🤖 *GÜÇLÜ UT BOT YAKALAMALARI*\n"
+            ut_stocks = ut_only.sort_values(by="Kalite", ascending=False).head(5)
             for _, row in ut_stocks.iterrows():
                 msg += f"👉 *{row['Hisse']}* | Puan: {row['Kalite']}/100 | Hedef 1: {row.get('Hedef 1', '-')}\n"
             msg += "\n"
             
-    # Pozitif Uyumsuzluk Sinyalleri
+    # Pozitif Uyumsuzluk Sinyalleri (Sadece Tek Başına Olanlar)
     if "has_bullish_div" in df_res.columns:
-        div_signals = df_res[df_res["has_bullish_div"] == True]
-        if not div_signals.empty:
-            msg += "🐂 *POZİTİF UYUMSUZLUK (Fiyat Düşerken Gösterge Yükseliyor)*\n"
-            div_stocks = div_signals.sort_values(by="Kalite", ascending=False).head(5)
+        # ULTIMATE olmayan, sadece Uyumsuzluk verenler
+        div_only = df_res[(df_res["has_bullish_div"] == True) & (df_res.get("UT_Plus_Div", False) == False)]
+        if not div_only.empty:
+            msg += "🐂 *POZİTİF UYUMSUZLUK (RADAR)*\n"
+            div_stocks = div_only.sort_values(by="Kalite", ascending=False).head(5)
             for _, row in div_stocks.iterrows():
                 msg += f"👉 *{row['Hisse']}* | Puan: {row['Kalite']}/100\n"
             msg += "\n"
