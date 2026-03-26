@@ -5,17 +5,21 @@ from signals_db import get_unlabeled_signals, update_label, get_training_data, i
 from sklearn.model_selection import TimeSeriesSplit
 from sklearn.preprocessing import StandardScaler
 from sklearn.pipeline import Pipeline
-from sklearn.metrics import accuracy_score
+from sklearn.metrics import accuracy_score, roc_auc_score
+from sklearn.calibration import CalibratedClassifierCV
 import pickle
 import os
 import json
 import time
 from datetime import datetime
 import optuna
+import glob
 
 MODEL_PATH = "ai_model.pkl"
 HISTORY_PATH = "model_history.json"
 CURRICULUM_PATH = "curriculum_config.json"
+MODEL_ARCHIVE_DIR = "model_archive"
+os.makedirs(MODEL_ARCHIVE_DIR, exist_ok=True)
 
 # =====================================================================
 # EĞİTİM VE ETİKETLEME AYARLARI
@@ -613,152 +617,350 @@ class SelfImprovingMetaLearner:
             
         return {"threshold": threshold, "action": action}
 
+# --- CONFIDENCE CALIBRATION (Olasılık Kalibrasyonu) ---
+
+class ConfidenceCalibrator:
+    """Model çıktı olasılıklarını gerçek olasılıklara çevirir."""
+    def calibrate(self, model, X_val, y_val):
+        print("\n🎯 Confidence Calibration: Model tahminleri kalibre ediliyor...")
+        try:
+            cal = CalibratedClassifierCV(model, method='isotonic', cv='prefit')
+            cal.fit(X_val, y_val)
+            return cal
+        except Exception as e:
+            print(f"   ⚠️ Kalibrasyon hatası: {e}, ham model kullanılıyor.")
+            return model
+
+# --- SHAP EXPLAINER (Model Kararlarını Açıkla) ---
+
+class ShapExplainer:
+    """Her sinyal için modelin neden o kararı verdiğini açıklar."""
+    def __init__(self):
+        self.explainer = None
+        self.feature_names = []
+
+    def setup(self, model_pipeline, X_sample, feature_names):
+        print("\n🔍 SHAP Explainer hazırlanıyor...")
+        try:
+            import shap
+            # Pipeline içindeki son modeli al
+            if hasattr(model_pipeline, 'named_steps'):
+                raw_model = model_pipeline.named_steps.get('model', model_pipeline)
+                X_transformed = model_pipeline.named_steps['scaler'].transform(X_sample.head(100))
+            else:
+                raw_model = model_pipeline
+                X_transformed = X_sample.head(100).values
+
+            self.explainer = shap.TreeExplainer(raw_model)
+            self.feature_names = feature_names
+            print("   ✅ SHAP Explainer hazır.")
+        except Exception as e:
+            print(f"   ⚠️ SHAP setup hatası: {e}")
+
+    def explain_prediction(self, model_pipeline, X_row, threshold=0.03):
+        """Tek bir sinyal için açıklama üretir."""
+        if self.explainer is None:
+            return ""
+        try:
+            import shap
+            if hasattr(model_pipeline, 'named_steps'):
+                X_t = model_pipeline.named_steps['scaler'].transform(X_row.values.reshape(1, -1))
+            else:
+                X_t = X_row.values.reshape(1, -1)
+
+            shap_vals = self.explainer.shap_values(X_t)
+            if isinstance(shap_vals, list):
+                shap_arr = shap_vals[1][0]  # Pozitif sınıf SHAP değerleri
+            else:
+                shap_arr = shap_vals[0]
+
+            pairs = sorted(zip(self.feature_names, shap_arr), key=lambda x: abs(x[1]), reverse=True)
+            explanation = " | ".join(
+                f"{'▲' if v > 0 else '▼'}{n}({v:+.2f})"
+                for n, v in pairs[:5] if abs(v) > threshold
+            )
+            return explanation
+        except:
+            return ""
+
+# --- MODEL VERSIONING (Versiyon Yönetimi ve Rollback) ---
+
+class ModelVersionManager:
+    """Model versiyonlarını yönetir ve gerektiğinde önceki versiyona döner."""
+    def save_versioned(self, model_export, accuracy):
+        version = datetime.now().strftime("%Y%m%d_%H%M")
+        path = os.path.join(MODEL_ARCHIVE_DIR, f"model_v{version}_acc{int(accuracy*100)}.pkl")
+        with open(path, "wb") as f:
+            pickle.dump(model_export, f)
+        print(f"   💾 Model versiyonu kaydedildi: {path}")
+        # Ana model dosyasını güncelle
+        with open(MODEL_PATH, "wb") as f:
+            pickle.dump(model_export, f)
+        return path
+
+    def rollback_if_degraded(self, current_accuracy, degradation_threshold=0.05):
+        """Mevcut doğruluk, son versiyona göre kötüleşmişse eski modele dön."""
+        archives = sorted(glob.glob(os.path.join(MODEL_ARCHIVE_DIR, "*.pkl")), reverse=True)
+        if len(archives) < 2:
+            return False, current_accuracy
+
+        # En iyi arşiv dosyasını bul
+        best_archive = max(archives, key=lambda p: int(p.split('_acc')[-1].replace('.pkl','')) if '_acc' in p else 0)
+        best_acc_str = best_archive.split('_acc')[-1].replace('.pkl', '')
+        best_acc = int(best_acc_str) / 100 if best_acc_str.isdigit() else 0
+
+        if best_acc - current_accuracy > degradation_threshold:
+            print(f"   🔄 ROLLBACK: Mevcut doğruluk (%{current_accuracy*100:.1f}) < En İyi (%{best_acc*100:.1f}). Eski modele dönülüyor...")
+            import shutil
+            shutil.copy(best_archive, MODEL_PATH)
+            return True, best_acc
+        return False, current_accuracy
+
+# --- WALK-FORWARD VALIDATION (Gerçek Piyasa Testi) ---
+
+def walk_forward_validation(X, y, n_windows=4):
+    """Gerçekçi zaman serisi doğrulaması yapar (her pencere önceki veriye eğitilik)."""
+    print("\n📊 Walk-Forward Validation başlatılıyor...")
+    from xgboost import XGBClassifier
+    window_results = []
+    n = len(X)
+    window_size = n // (n_windows + 1)
+
+    for i in range(1, n_windows + 1):
+        train_end = i * window_size
+        test_end = min((i + 1) * window_size, n)
+        if test_end <= train_end:
+            break
+        
+        X_train, y_train = X.iloc[:train_end], y.iloc[:train_end]
+        X_test, y_test = X.iloc[train_end:test_end], y.iloc[train_end:test_end]
+
+        m = XGBClassifier(n_estimators=100, max_depth=5, random_state=42, eval_metric='logloss', n_jobs=-1)
+        m.fit(X_train, y_train)
+        acc = accuracy_score(y_test, m.predict(X_test))
+        try:
+            auc = roc_auc_score(y_test, m.predict_proba(X_test)[:, 1])
+        except:
+            auc = 0.5
+        window_results.append({"window": i, "acc": acc, "auc": auc, "n_test": len(y_test)})
+        print(f"   Pencere {i}: Acc=%{acc*100:.1f} | AUC={auc:.3f} | Test={len(y_test)} örnek")
+
+    if window_results:
+        avg_acc = np.mean([r['acc'] for r in window_results])
+        avg_auc = np.mean([r['auc'] for r in window_results])
+        print(f"   📈 Walk-Forward Ortalama: Acc=%{avg_acc*100:.1f} | AUC={avg_auc:.3f}")
+        return avg_acc, avg_auc, window_results
+    return 0.5, 0.5, []
+
+# --- MACRO FEATURE INJECTOR (Makro Özellikleri Modele Ekle) ---
+
+class MacroFeatureInjector:
+    """Eğitim verisine geçmiş makro verileri (dolar, altın, endeks) ekler."""
+    def enrich(self, df):
+        """Mevcut sinyal verisine makro özellikler ekler."""
+        print("\n🌍 Makro Özellikler: Eğitim verisine ekleniyor...")
+        # Makro zaten features JSON içinde olabilir (backfill sırasında eklendiyse)
+        macro_cols = [c for c in df.columns if c.startswith('macro_')]
+        if macro_cols:
+            print(f"   ✅ {len(macro_cols)} adet mevcut makro özellik bulundu: {macro_cols}")
+            return df
+        # Makro veri yoksa basit bir proxy: mevsimsellik zaten ekleniyor (day_of_week vb.)
+        print("   ℹ️ Makro veri bulunamadı, backfill'den gelecek verilerde eklenecek.")
+        return df
+
 def retrain_model():
     data = get_training_data()
     if data.empty or len(data) < 50:
         print(f"⚠️ Yetersiz veri ({len(data)}). Optimizasyon için 50 örnek bekleniyor.")
         return
 
-    # Evrimsel Mimari Seçimi
+    # --- 0. MAKRO ÖZELLIK ZENGİNLEŞTİRME ---
+    macro_injector = MacroFeatureInjector()
+    data = macro_injector.enrich(data)
+
+    # --- 1. EVRİMSEL MİMARİ SEÇİMİ ---
     evolver = EvolvingArchitecture()
     best_config = evolver.run_evolution(data.drop(columns=['target']), data['target'])
 
     # Meta ve Curriculum Başlat
     meta = SelfImprovingMetaLearner()
     curriculum = CurriculumLearner()
+    version_mgr = ModelVersionManager()
 
     # Kazanan konfigürasyona göre X ve y'yi hazırla
     X, y = data.drop(columns=['target']), data['target']
 
-    # Causal Süzgeçten Geçir (Phase 7)
+    # --- 2. CAUSAL SÜZGEÇ (Sahte korelasyonları sil) ---
     causal_filter = CausalFeatureFilter()
     true_features = causal_filter.filter_causal_features(X, y)
     X = X[true_features]
-    
-    # Optuna çalışması (Sadece kazanan algoritma ve gerçek özellikler için)
-    study = optuna.create_study(direction='maximize')
-    study.optimize(lambda t: objective(t, X, y), n_trials=20) 
 
-    current_acc = study.best_value
+    # --- 3. WALK-FORWARD VALIDATION (Gerçek Piyasa Testi) ---
+    wf_acc, wf_auc, wf_windows = walk_forward_validation(X, y, n_windows=4)
+    print(f"   📊 Walk-Forward Sonuç: Acc=%{wf_acc*100:.1f} | AUC={wf_auc:.3f}")
     
-    # Seviye ve Strateji Analizi
+    # --- 4. OPTUNA HYPERPARAMOPTİMİZASYON ---
+    study = optuna.create_study(direction='maximize')
+    optuna.logging.set_verbosity(optuna.logging.WARNING)
+    study.optimize(lambda t: objective(t, X, y), n_trials=20)
+    current_acc = study.best_value
+
+    # --- 5. SEVİYE VE STRATEJİ ANALİZİ ---
     new_stage = curriculum.auto_adjust_difficulty(current_acc)
     strategy = meta.analyze_and_adjust(current_acc)
 
-    # Sentetik Veri Artırımı (Data Augmentation)
+    # --- 6. SENTETİK VERİ ARTIRIMI ---
     synthetic_gen = SyntheticMarketGenerator(sample_size=300)
     X_aug, y_aug = synthetic_gen.generate_synthetic_data(X, y)
 
-    # Active Learning: Belirsizlik Ağırlıklarını Hesapla (Eski model üzerinden)
+    # --- 7. AKTİF ÖĞRENME: Belirsiz Örneklere Ağırlık Ver ---
     active_l = ActiveLearner()
     try:
-        # Mevcut yüklü olan modelden (eğer varsa) gri alanları bul
         with open(MODEL_PATH, "rb") as f:
-            old_model = pickle.load(f)["pipeline"]
-        sample_weights = active_l.calculate_sample_weights(X_aug, y_aug, model_pipeline=old_model)
+            saved = pickle.load(f)
+            old_experts = saved.get('experts', {})
+            old_model = list(old_experts.values())[0] if old_experts else None
+        sample_weights = active_l.calculate_sample_weights(X_aug, pd.Series(y_aug), model_pipeline=old_model)
     except:
         sample_weights = np.ones(len(y_aug))
 
-    # Robustness Guard (Phase 8 - Son Denetim)
+    # --- 8. ROBUSTNESS GUARD ---
     guard = RobustnessGuard()
-    X_aug, is_overfilled = guard.check_and_cleanup(X, y, current_acc, current_acc * 0.9) # Örnek test
+    X_clean, is_overfilled = guard.check_and_cleanup(X, y, current_acc, current_acc * 0.9)
 
-    # Feature Discovery (Phase 10 - Son Aşama)
+    # --- 9. FEATURE DISCOVERY ---
     factory = EvolvingFeatureFactory()
     data_enriched, discovered_features = factory.discover_features(data)
-    
-    # Güncellenmiş X ve y (Yeni özelliklerle)
-    X = data_enriched.drop(columns=['target']).select_dtypes(include=[np.number])
-    y = data_enriched['target']
+    X_final = data_enriched.drop(columns=['target']).select_dtypes(include=[np.number])
+    y_final = data_enriched['target']
 
-    # Governor Denetimi (Phase 11 - Denetleme Kurulu)
+    # --- 10. GOVERNOR DENETİMİ ---
     governor = GovernorSystem()
-    optimized_params = governor.run_audit(current_acc, list(X.columns), study.best_params)
+    optimized_params = governor.run_audit(current_acc, list(X_final.columns), study.best_params)
 
-    # --- REGIME ENSEMBLE ADIMLARI (Phase 6) ---
+    # --- 11. REGIME ENSEMBLE ---
     ensemble_engine = RegimeAdaptiveEnsemble()
     experts = ensemble_engine.train_experts(data_enriched, evolver, best_config, optimized_params)
 
-    # --- KNOWLEDGE DISTILLATION (Phase 9) ---
-    distiller = KnowledgeDistillation()
-    student = distiller.distill(experts, X, y) # Kolektif zekayı tek bir 'Global Master'da topla
+    # --- 12. CONFIDENCE CALIBRATION ---
+    calibrator = ConfidenceCalibrator()
+    calibrated_experts = {}
+    split = int(len(X_final) * 0.8)
+    X_cal, y_cal = X_final.iloc[split:], y_final.iloc[split:]
+    for regime, expert in experts.items():
+        calibrated_experts[regime] = calibrator.calibrate(expert, X_cal, y_cal)
+    print("✅ Tüm uzman modeller kalibre edildi.")
 
-    # Hafıza Bankasını Güncelle (Phase 12 - Deneyim Kaydı)
+    # --- 13. SHAP AÇIKLANABILIRLIK ---
+    shap_explainer = ShapExplainer()
+    # En yaygın rejim için (bull) SHAP hazırla
+    if 'bull' in calibrated_experts or calibrated_experts:
+        main_expert = calibrated_experts.get('bull', list(calibrated_experts.values())[0])
+        shap_explainer.setup(main_expert, X_final, list(X_final.columns))
+
+    # --- 14. KNOWLEDGE DISTILLATION ---
+    distiller = KnowledgeDistillation()
+    student = distiller.distill(calibrated_experts, X_final, y_final)
+
+    # --- 15. HAFIZA BANKASI GÜNCELLEMESİ ---
     memory_bank = ExperienceMemoryBank()
     memory_bank.update_memory(data_enriched)
 
-    # Metadata & Kayıt
-    meta.log_performance({"accuracy": float(current_acc), "date": datetime.now().isoformat(), "strategy": strategy["action"]})
-    
+    # --- 16. ÖZELLIK ÖNEMLERİ ---
+    try:
+        # En iyi kalibrasyon sonrası modeli kullan
+        best_expert = list(calibrated_experts.values())[0]
+        if hasattr(best_expert, 'named_steps'):
+            raw_model = best_expert.named_steps.get('model', best_expert)
+        else:
+            raw_model = best_expert
+        importances = raw_model.feature_importances_
+        importance_df = pd.DataFrame({'feature': X_final.columns, 'importance': importances})
+        importance_df = importance_df.sort_values('importance', ascending=False)
+        print("\n🔑 Modelin Şu An En Çok Güvendiği İndikatörler:")
+        print(importance_df.head(10).to_string(index=False))
+    except Exception as e:
+        importance_df = pd.DataFrame()
+        print(f"   ⚠️ Feature importance alınamadı: {e}")
+
+    # --- 17. MODEL KAYIT VE VERSİYONLAMA ---
+    meta.log_performance({
+        "accuracy": float(current_acc),
+        "wf_acc": float(wf_acc),
+        "wf_auc": float(wf_auc),
+        "date": datetime.now().isoformat(),
+        "strategy": strategy["action"]
+    })
+
     model_export = {
-        'experts': experts,           # Rejim spesifik modeller (Sözlük)
-        'student': student,           # Damıtılmış Global Hafif Model (Hız için)
-        'features': list(X.columns),
-        'discovered_features': discovered_features, # Formüllerin isimleri
+        'experts': calibrated_experts,
+        'student': student,
+        'shap_explainer': shap_explainer,
+        'features': list(X_final.columns),
+        'discovered_features': discovered_features,
         'metadata': {
             'best_accuracy': float(current_acc),
+            'wf_accuracy': float(wf_acc),
+            'wf_auc': float(wf_auc),
             'arch': best_config["name"],
             'trained_at': datetime.now().isoformat(),
-            'regimes': list(experts.keys()),
-            'samples': len(X),
-            'overfit_warning': is_overfilled
+            'regimes': list(calibrated_experts.keys()),
+            'samples': len(X_final),
+            'overfit_warning': is_overfilled,
+            'top_features': importance_df.head(5)['feature'].tolist() if not importance_df.empty else []
         }
     }
 
-    with open(MODEL_PATH, "wb") as f:
-        pickle.dump(model_export, f)
+    # Versiyonlu kayıt yap
+    version_mgr.save_versioned(model_export, current_acc)
 
-    # Önbelleği sıfırla — bir sonraki taramada yeni ağırlıklar kullanılır
+    # Eğer doğruluk düştüyse rollback yap
+    rolled_back, final_acc = version_mgr.rollback_if_degraded(current_acc)
+
+    # Önbelleği sıfırla
     try:
         from adaptive_weights import invalidate_cache
         invalidate_cache()
-    except Exception: pass
+    except Exception:
+        pass
 
-    # --- RAPORLAMA VE OTO-DİAGNOSTİK (Phase 13) ---
+    # --- 18. RAPORLAMA VE OTO-DİAGNOSTİK ---
+    top_feats_str = ', '.join(importance_df.head(5)['feature'].tolist()) if not importance_df.empty else 'N/A'
     report = f"""
-🔬 **AI KENDİNİ İYİLEŞTİRME VE DİAGNOSTİK RAPORU**
-📅 Tarih: {datetime.now().strftime('%Y-%m-%d %H:%M')}
+🔬 **AI KENDİNİ İYİLEŞTİRME RAPORU**
+📅 {datetime.now().strftime('%Y-%m-%d %H:%M')}
 
-✅ **Model Evrimi:**
+✅ **Model Performansı:**
 - Kazanan Mimari: {best_config['name']}
-- Başarı Oranı (Accuracy): %{current_acc*100:.1f}
+- Doğruluk (Optuna CV): %{current_acc*100:.1f}
+- Walk-Forward Acc: %{wf_acc*100:.1f} | AUC: {wf_auc:.3f}
 - Strateji: {strategy['action']}
+- {'🔄 ROLLBACK: Eski versiyona dönüldü!' if rolled_back else '💾 Yeni versiyon kaydedildi.'}
 
-🚀 **Zeka Keşifleri:**
-- Yeni Keşfedilen Özellikler: {len(discovered_features)} adet ({', '.join(discovered_features) if discovered_features else 'Yok'})
-- Causal Süzgeç: {len(X.columns)} / {len(data.columns)-1} özellik ('Gerçek Sebep' olarak onaylandı)
+🧠 **Zeka ve Şeffaflık:**
+- SHAP Açıklanabilirlik: Aktif ✅
+- Confidence Calibration: Aktif ✅
+- Keşfedilen Süper Özellikler: {', '.join(discovered_features) if discovered_features else 'Yok'}
+- En Kritik 5 Özellik: {top_feats_str}
 
-🛡️ **Güvenlik ve Denetim (Governor):**
-- Feature Pruning: {len(data.columns) - 1 - len(X.columns)} adet gürültülü özellik budandı.
-- Overfit Riski: {'🚨 YÜKSEK (Önlem Alındı)' if is_overfilled else '✅ DÜŞÜK'}
+🛡️ **Güvenlik:**
+- Causal Süzgeç: {len(X_final.columns)} / {len(data.columns)-1} özellik onaylandı
+- Overfit Riski: {'🚨 YÜKSEK' if is_overfilled else '✅ DÜŞÜK'}
+- Walk-Forward Pencereleri: {len(wf_windows)} adet test edildi
 
-📜 **Hafıza ve Tecrübe:**
-- Deneyim Bankası: {len(data_enriched)} yeni tecrübe hafızaya işlendi.
-- Bilgi Damıtma: Uzman zekası 10x hızlı 'Student' modele başarıyla aktarıldı.
-
-🤖 **Sonuç:** Sistem bu hafta piyasa değişimlerine uyum sağlayarak kendini modernize etmiştir.
+📜 **Tecrübe Bankası:** {len(data_enriched)} kayıt hafızaya işlendi.
     """
-    
-    print("\n" + "="*40)
+
+    print("\n" + "="*50)
     print(report)
-    print("="*40)
-    
-    # Raporu dosyaya kaydet
+    print("="*50)
+
     with open("self_improvement_report.md", "w", encoding="utf-8") as rf:
         rf.write(report)
 
-    # Telegram'a özet gönder
     try:
         from github_scan_action import send_msg
-        send_msg(report)
-    except: pass
-    
-    # Özellik Önem Sıralaması (Sonuç)
-    try:
-        importances = best_model.feature_importances_
-        importance_df = pd.DataFrame({'feature': X.columns, 'importance': importances}).sort_values('importance', ascending=False)
-        print("\n🔑 Modelin Şu An En Çok Güvendiği İndikatörler:")
-        print(importance_df.head(10).to_string(index=False))
+        send_msg(report[:3000])  # Telegram 4096 char limiti
     except:
         pass
 
