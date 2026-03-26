@@ -21,6 +21,13 @@ from data_fetcher import (
 )
 from database import init_db, save_scan_results, get_new_elite_entries
 
+# --- Veri Tespiti (GUI mi yoksa Script mi?) ---
+try:
+    from streamlit.runtime.scriptrunner import get_script_run_ctx
+    is_gui = get_script_run_ctx() is not None
+except:
+    is_gui = False
+
 # Initialize DB
 init_db()
 
@@ -79,7 +86,7 @@ def init_gui():
         st.rerun()    # --- Veritabanı İlklendirme ---
     init_db()
 
-    if "symbols_text" not in st.session_state:
+    if is_gui and "symbols_text" not in st.session_state:
         if st.session_state.piyasa == "NASDAQ":
             st.session_state.symbols_text = ", ".join(DEFAULT_NASDAQ_HISSELER)
         elif st.session_state.piyasa == "BIST":
@@ -87,9 +94,9 @@ def init_gui():
         else:
             st.session_state.symbols_text = ", ".join(DEFAULT_CRYPTO_SYMBOLS)
             
-    if "scan_df" not in st.session_state:
+    if is_gui and "scan_df" not in st.session_state:
         st.session_state.scan_df = pd.DataFrame()
-    if "scan_errs" not in st.session_state:
+    if is_gui and "scan_errs" not in st.session_state:
         st.session_state.scan_errs = []
 
     main_tab1, main_tab2 = st.tabs(["🚀 Sistem Taraması (Screener)", "⏪ Geriye Dönük Test (Backtest)"])

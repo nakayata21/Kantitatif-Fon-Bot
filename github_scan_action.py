@@ -147,7 +147,8 @@ if __name__ == "__main__":
         print(f"[{datetime.now(TR_TZ)}] Durum: {status}. {MARKET} taraması başlatılıyor...")
         
         if MARKET == "BIST":
-            symbols = DEFAULT_BIST_HISSELER
+            from constants import DEFAULT_BIST_30
+            symbols = DEFAULT_BIST_30
         elif MARKET == "NASDAQ":
             symbols = DEFAULT_NASDAQ_HISSELER
         elif MARKET == "CRYPTO":

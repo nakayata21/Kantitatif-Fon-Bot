@@ -32,13 +32,17 @@ def init_db():
     conn.commit()
     conn.close()
 
-def log_signal(symbol, exchange, price, signal_type, features, market_context=None):
+def log_signal(symbol, exchange, price, signal_type, features, market_context=None, signal_time=None):
     """Sinyali, o anki teknik özellikleri ve piyasa bağlamını veritabanına kaydeder."""
     import json
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
-    now = datetime.now().isoformat()
-    # Pazar analizleri için market_context verisini de features içine gömüyoruz
+    # Eğer signal_time verilmediyse güncel zamanı kullan
+    if not signal_time:
+        now = datetime.now().isoformat()
+    else:
+        now = signal_time if isinstance(signal_time, str) else signal_time.isoformat()
+        
     if market_context:
         features.update(market_context)
     

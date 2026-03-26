@@ -9,6 +9,7 @@ from sklearn.metrics import accuracy_score
 import pickle
 import os
 import json
+import time
 from datetime import datetime
 import optuna
 
@@ -23,30 +24,66 @@ SL_PERCENT = 3.0   # Örnek Zarar Bariyeri
 MAX_DAYS   = 10    # Maksimum bekleme günü
 # =====================================================================
 
-def get_price_history(symbol, exchange, days=MAX_DAYS + 5):
-    try:
-        ticker = symbol if exchange != "BIST" else f"{symbol}.IS"
-        data = yf.download(ticker, period=f"{days}d", interval="1d", progress=False)
-        return data if not data.empty else None
-    except:
-        return None
+# --- OPTIMIZED LABELING ---
+_history_cache = {}
+_tv_instance = None
 
-def apply_triple_barrier(row):
+def get_tv_instance():
+    global _tv_instance
+    if _tv_instance is None:
+        try:
+            from tvDatafeed import TvDatafeed
+            _tv_instance = TvDatafeed()
+        except:
+            return None
+    return _tv_instance
+
+def get_cached_history(symbol, exchange):
+    if symbol in _history_cache:
+        return _history_cache[symbol]
+    
+    # Öncelikle yfinance dene
+    ticker = symbol if exchange != "BIST" else f"{symbol}.IS"
+    try:
+        data = yf.download(ticker, period="2y", interval="1d", progress=False)
+        if not data.empty:
+            _history_cache[symbol] = data
+            return data
+    except:
+        pass
+
+    # Eğer yfinance başarısızsa (Rate Limit vb.), TvDatafeed dene
+    try:
+        tv = get_tv_instance()
+        if tv:
+            data = tv.get_hist(symbol=symbol, exchange=exchange, interval='1d', n_bars=600)
+            if data is not None and not data.empty:
+                # Sütun isimlerini yfinance formatına uyarla
+                data = data.rename(columns={'open': 'Open', 'high': 'High', 'low': 'Low', 'close': 'Close', 'volume': 'Volume'})
+                _history_cache[symbol] = data
+                return data
+    except:
+        pass
+        
+    return None
+
+def apply_triple_barrier_optimized(row):
+    history = get_cached_history(row['symbol'], row['exchange'])
+    if history is None or history.empty: return None, None, None, None, None
+    
     entry_price = row['price_at_signal']
     tp_level = entry_price * (1 + TP_PERCENT / 100)
     sl_level = entry_price * (1 - SL_PERCENT / 100)
     
-    history = get_price_history(row['symbol'], row['exchange'])
-    if history is None or history.empty: return None, None, None, None, None
-    
     signal_time = pd.to_datetime(row['time_at_signal'])
-    history.index = pd.to_datetime(history.index)
+    # Veriyi sinyal zamanından sonrasına filtrele
     future_bars = history[history.index > signal_time].head(MAX_DAYS)
     
     if future_bars.empty: return None, None, None, None, None
     
     highs, lows = future_bars['High'].values.flatten(), future_bars['Low'].values.flatten()
-    last_close = float(future_bars['Close'].values.flatten()[-1])
+    closes = future_bars['Close'].values.flatten()
+    last_close = float(closes[-1])
     max_p, min_p = float(np.max(highs)), float(np.min(lows))
     outcome = ((last_close - entry_price) / entry_price) * 100
     
@@ -57,10 +94,22 @@ def apply_triple_barrier(row):
 
 def label_past_signals():
     df = get_unlabeled_signals(days_ago=MAX_DAYS)
-    print(f"\n🔍 {len(df)} adet sinyal Triple Barrier ile inceleniyor...")
+    if df.empty:
+        print("✅ Etiketlenecek yeni sinyal bulunamadı.")
+        return
+        
+    unique_symbols = df[['symbol', 'exchange']].drop_duplicates()
+    print(f"\n🔍 {len(df)} adet sinyal için {len(unique_symbols)} sembolün geçmiş verisi indiriliyor...")
+    
+    # Tüm sembollerin verilerini önceden indir ve cache'le
+    for _, row in unique_symbols.iterrows():
+        get_cached_history(row['symbol'], row['exchange'])
+        time.sleep(1) # Saygılı indirme
+        
+    print(f"✅ Veriler hazır. Triple Barrier işlemi başlatılıyor...")
     success = 0
     for _, row in df.iterrows():
-        outcome, label_type, max_p, min_p, _ = apply_triple_barrier(row)
+        outcome, label_type, max_p, min_p, _ = apply_triple_barrier_optimized(row)
         if outcome is not None:
             update_label(row['id'], outcome, label_type, max_p, min_p)
             success += 1
