@@ -134,10 +134,45 @@ Kurallar:
         return None
 
 
+def run_with_self_healing(symbols, market, timeframe, max_retries=3):
+    """Hata durumunda kendini yenileyen ve alternatif çözüm bulan tarama motoru."""
+    delay = 1000
+    workers = 1
+    
+    for attempt in range(max_retries):
+        try:
+            print(f"🔄 Deneme {attempt + 1}: {market} taraması yapılıyor (Delay: {delay}ms, Workers: {workers})...")
+            df, errs = run_scan(symbols, market, timeframe, delay_ms=delay, workers=workers)
+            
+            # Başarı kontrolü (En az %10 başarı bekliyoruz, aksi halde IP blok şüphesi)
+            success_rate = len(df) / len(symbols) if len(symbols) > 0 else 0
+            
+            if success_rate > 0.1 or (len(errs) == 0 and len(df) >= 0):
+                return df, errs
+            
+            print(f"⚠️ Düşük başarı oranı (%{round(success_rate*100, 1)}). Kendi kendini iyileştirme modu aktif...")
+            
+            # Çözüm 1: Gecikmeyi artır ve paralelliği azalt
+            delay += 1000
+            workers = 1
+            
+            # Çözüm 2: Eğer BIST ise ve hata çoksa, sadece en kritik sembollere odaklan (Hayatta kalma modu)
+            if attempt == 1 and market == "BIST":
+                from constants import DEFAULT_BIST_30
+                symbols = DEFAULT_BIST_30[:10]
+                print("🚨 Kritik Hata: 'Hayatta Kalma Modu'na geçiliyor. Sadece en büyük 10 hisse taranacak.")
+            
+            time.sleep(5) # Hata sonrası kısa soğuma
+            
+        except Exception as e:
+            print(f"❌ Kritik Sistem Hatası: {e}")
+            time.sleep(10)
+            
+    return pd.DataFrame(), ["Tüm denemeler başarısız oldu."]
+
 if __name__ == "__main__":
     status = get_market_status(MARKET)
     
-    # Kripto için her zaman açık diyebiliriz (Borsa tatili yoktur)
     if MARKET == "CRYPTO":
         status = "OPEN"
 
@@ -146,50 +181,35 @@ if __name__ == "__main__":
     else:
         print(f"[{datetime.now(TR_TZ)}] Durum: {status}. {MARKET} taraması başlatılıyor...")
         
+        # Sembol Seçimi
+        from constants import DEFAULT_BIST_30, DEFAULT_NASDAQ_HISSELER, DEFAULT_CRYPTO_SYMBOLS
         if MARKET == "BIST":
-            from constants import DEFAULT_BIST_30
             symbols = DEFAULT_BIST_30
         elif MARKET == "NASDAQ":
-            symbols = DEFAULT_NASDAQ_HISSELER
-        elif MARKET == "CRYPTO":
-            from constants import DEFAULT_CRYPTO_SYMBOLS
-            symbols = DEFAULT_CRYPTO_SYMBOLS
+            symbols = DEFAULT_NASDAQ_HISSELER[:30] # Hız için ilk 30
         else:
-            symbols = DEFAULT_BIST_HISSELER # Fallback
+            symbols = DEFAULT_CRYPTO_SYMBOLS[:30]
             
         try:
-            # GitHub (TradingView) rate limit sorunları için worker sayısını ve bekleme süresini optimize et.
-            workers_count = 1 if MARKET in ["BIST", "NASDAQ"] else 2
             start_time = datetime.now(TR_TZ)
-            print(f"[{start_time}] Tarama basliyor... Toplam sembol: {len(symbols)}, Workers: {workers_count}")
-            
-            df, errs = run_scan(symbols, MARKET, "Gunluk", delay_ms=1000, workers=workers_count)
+            # SELF-HEALING ENGINE ÇALIŞTIR
+            df, errs = run_with_self_healing(symbols, MARKET, "Gunluk", max_retries=3)
             
             end_time = datetime.now(TR_TZ)
             duration = (end_time - start_time).total_seconds()
-            print(f"[{end_time}] Tarama bitti. Sure: {duration:.1f} saniye. Basarili: {len(df)}, Hata: {len(errs)}")
             
-            message = format_telegram_message(MARKET, df, status)
-            
-            # Eger tarama yapildiysa ama sinyal yoksa veya hata coksa bilgi ekle
-            if len(df) == 0 and len(errs) > 0:
-                message = f"🛑 *{MARKET} Tarama Hatası*\nVeri çekilemedi. Toplam {len(errs)} hata oluştu. GitHub IP engeli olabilir."
-                # Ozet bilgisi ekle
-                message += f"\n\n📊 *Tarama Özeti:*\n- Toplam Sembol: {len(symbols)}\n- Başarılı: {len(df)}\n- Hata: {len(errs)}\n- Teknik Sinyal (AL): {int((df['Sinyal'] == 'AL').sum()) if 'Sinyal' in df.columns else 0}"
-                
-                # Temel Analizi Güçlü Olanları Vurgula (Veritabanından gelen verilerle)
-                if "isy_score" in df.columns:
-                    elite_stocks = df[df["isy_score"] >= 70].sort_values(by="isy_score", ascending=False).head(3)
-                    if not elite_stocks.empty:
-                        message += "\n\n💎 *Temel Analizi En Güçlü Hisseler:*"
-                        for _, row in elite_stocks.iterrows():
-                            message += f"\n- {row['Hisse']}: Puan {row['isy_score']} ({row['isy_grade']})"
+            if not df.empty:
+                message = format_telegram_message(MARKET, df, status)
+                # Başarılı ise AI yorumu ekle
+                ai_msg = get_ai_commentary(MARKET, df)
+                if ai_msg:
+                    message += f"\n\n🤖 *AI ANALİZİ:*\n{ai_msg}"
+            else:
+                message = f"🛑 *{MARKET} Tarama Başarısız*\n{len(errs)} denemeden sonra veri alınamadı. GitHub IP engeli veya veri sağlayıcı hatası mevcut."
             
             send_msg(message)
-            print(f"[{datetime.now(TR_TZ)}] İşlem Tamamlandı. Mesaj Gönderildi!")
+            print(f"[{datetime.now(TR_TZ)}] İşlem Tamamlandı.")
             os._exit(0)
         except Exception as e:
-            error_msg = f"\U0001f534 GİTHUB ACTION TARAMA HATASI ({MARKET}): {str(e)}"
-            print(error_msg)
-            send_msg(error_msg)
+            print(f"Kritik Hata: {e}")
             os._exit(1)

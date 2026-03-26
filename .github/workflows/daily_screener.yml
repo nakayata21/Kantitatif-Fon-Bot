@@ -17,7 +17,10 @@ jobs:
       fail-fast: false
       matrix:
         market: [BIST, NASDAQ, CRYPTO]
-    timeout-minutes: 45
+    timeout-minutes: 15
+    concurrency:
+      group: ${{ github.workflow }}-${{ matrix.market }}-${{ github.ref }}
+      cancel-in-progress: true
     steps:
       - name: Kodları Çek
         uses: actions/checkout@v4
@@ -33,10 +36,14 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
           
-      - name: Taramayı Başlat
+      - name: Taramayı Başlat (Self-Healing ile)
+        uses: nick-fields/retry@v3
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           TARGET_MARKET: ${{ matrix.market }}
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
-        run: python github_scan_action.py
+        with:
+          timeout_minutes: 12
+          max_attempts: 2
+          command: python github_scan_action.py
