@@ -217,6 +217,37 @@ def add_indicators(df: pd.DataFrame, index_df: pd.DataFrame = None) -> pd.DataFr
     
     out["minervini_template"] = m1 & m2 & m3 & m4 & m5 & m6 & m7
 
+    # --- Uzun Süreli Düşüş (Ayı Piyasası) ve Dönüş Analizi ---
+    # 1. Uzun Süreli Düşüş Durumu
+    out["sma200_slope"] = out["sma200"].pct_change(20) * 100
+    out["in_bear_market"] = (out["close"] < out["sma200"]) & (out["sma200_slope"] < 0)
+    
+    # Kaç bardır SMA200 altında (Düşüşün süresi)
+    bear_count = (out["close"] < out["sma200"]).astype(int)
+    out["bars_below_sma200"] = bear_count.groupby((bear_count != bear_count.shift()).cumsum()).cumsum()
+    
+    # Zirveden düşüş oranı
+    out["drop_from_52w_high"] = ((out["high_52w"] - out["close"]) / out["high_52w"]) * 100
+    
+    # 2. Tükenme (Capitulation) Belirtileri
+    out["is_capitulation"] = (out["rsi"] < 32) & (out["vol_spike"] > 1.5) & (out["in_bear_market"])
+    
+    # 3. Dönüş (Reversal) Sinyalleri
+    # SMA50 üzerine hacimli çıkış
+    out["reversal_breakout"] = (out["close"] > out["sma50"]) & (out["close"].shift(1) <= out["sma50"].shift(1)) & (out["vol_spike"] > 1.2)
+    
+    # Pozitif Uyumsuzluk Kontrolü (Basit RSI HL Kontrolü)
+    out["rsi_higher_low"] = (out["rsi"] > out["rsi"].shift(1)) & (out["low"] <= out["low"].shift(1)) & (out["rsi"] < 40)
+
+    # 4. Uzun Süreli Düşüş Bitiş Skoru (0-100)
+    rev_score = (
+        (out["reversal_breakout"].astype(int) * 40) +
+        ((out["close"] > out["ema20"]).astype(int) * 20) +
+        (out["rsi_higher_low"].astype(int) * 20) +
+        ((out["drop_from_52w_high"] > 30).astype(int) * 20)
+    )
+    out["reversal_potential"] = rev_score.clip(0, 100)
+
     # --- Stan Weinstein Stage Analysis (Haftalık Bazda Daha Doğru Çalışır) ---
     out["sma30_w"] = ta.trend.SMAIndicator(close=out["close"], window=30, fillna=True).sma_indicator()
     out["sma30_w_slope"] = out["sma30_w"].pct_change(5)
@@ -258,6 +289,15 @@ def add_indicators(df: pd.DataFrame, index_df: pd.DataFrame = None) -> pd.DataFr
     else:
         out["mansfield_rs"] = 0.0
 
+    # --- AI DISCOVERED SYNTHETIC FEATURES (Phase 10) ---
+    # Bu hibrit özellikler EvolvingFeatureFactory tarafından keşfedilmiştir.
+    # RSI * Momentum (Fiyat hızı ve güç dengesi)
+    out['feat_rsi_mom'] = out['rsi'] * (out['close'].pct_change(20).fillna(0) * 100)
+    # Hacim Patlaması / ATR % (Oynaklığa oranlı gerçek hacim girişi)
+    out['feat_vol_atr'] = out['vol_spike'] / (out['atr_pct'].replace(0, np.nan) + 0.1)
+    # Trend Gücü (ADX ve EMA eğimi kombinasyonu)
+    out['feat_trend_strength'] = out['adx'] * out['ema20_slope'].fillna(0)
+    
     return out
 
 def calculate_price_targets(base_df: pd.DataFrame) -> Optional[dict]:

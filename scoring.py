@@ -1,7 +1,40 @@
-
-import pandas as pd
-from typing import Dict, Tuple
 from utils import clamp, _safe_get
+from adaptive_weights import load_adaptive_weights
+from policy_optimizer import TradingPolicyOptimizer
+import numpy as np
+import pandas as pd
+import pickle
+import os
+from typing import Dict, Tuple
+
+# --- EXPERIENCE REPLAY (Hafıza ve Tecrübe Sorgulama) ---
+
+def query_experience_memory(current_row, feature_list):
+    """
+    Geçmiş tecrübelerden benzer durumları bulur ve başarı oranını döner.
+    """
+    path = "experience_bank.pkl"
+    if not os.path.exists(path): return 0.5 # Hafıza yoksa etkisiz (0.5)
+    
+    try:
+        with open(path, "rb") as f:
+            mem = pickle.load(f)
+        
+        # Mevcut özellikleri al ve eksik değerleri temizle
+        current_feats = current_row[feature_list].fillna(0).values.reshape(1, -1)
+        mem_feats = mem['features'][feature_list].fillna(0).values
+        mem_targets = mem['targets']
+        
+        # Basit Mesafe Ölçümü (Benzerlik)
+        distances = np.linalg.norm(mem_feats - current_feats, axis=1)
+        nearest_idx = np.argsort(distances)[:15] # En yakın 15 tecrübe
+        
+        # Geçmişteki Başarı Oranı (0 ile 1 arası)
+        historical_win_rate = np.mean(mem_targets[nearest_idx])
+        return historical_win_rate
+    except Exception as e:
+        # print(f"Memory Retrieval Error: {e}")
+        return 0.5
 
 def calculate_piotroski(df: pd.DataFrame) -> Tuple[int, Dict[str, bool]]:
     """Piotroski F-Score hesaplar (0-9 puan)"""
@@ -311,6 +344,24 @@ def score_symbol(last: pd.Series, prev: pd.Series, conf_last: pd.Series, market:
     dip_signal_str = " | ".join(dip_signals) if dip_signals else "-"
     is_solid_bottom = dip >= 45
 
+    # 2.1 UZUN SÜRELİ DÜŞÜŞ BİTİŞ ANALİZİ (REVERSAL)
+    rev_pot = float(_safe_get(last, "reversal_potential", 0.0))
+    in_bear = bool(_safe_get(last, "in_bear_market", False))
+    is_cap  = bool(_safe_get(last, "is_capitulation", False))
+    rev_brk = bool(_safe_get(last, "reversal_breakout", False))
+    bars_below = int(_safe_get(last, "bars_below_sma200", 0))
+    drop_pct = float(_safe_get(last, "drop_from_52w_high", 0.0))
+
+    reversal_score = 0.0
+    if in_bear or bars_below > 60:
+        reversal_score = rev_pot
+        if is_cap: reversal_score += 15
+        if rev_brk: reversal_score += 25
+        
+    is_long_term_reversal = (reversal_score >= 65) and (drop_pct > 25)
+    if is_long_term_reversal:
+        dip = max(dip, reversal_score) # Dip puanını reversal puanıyla güncelle
+
     # 3. BREAKOUT (KIRILIM) SKORU
     breakout_up = bool(_safe_get(last, "breakout_up", False))
     breakout = 0.0
@@ -411,23 +462,49 @@ def score_symbol(last: pd.Series, prev: pd.Series, conf_last: pd.Series, market:
     # 9. STAN WEINSTEIN STAGE ANALYSIS
     w_score, w_msg, w_stage_tag = score_weinstein(last, conf_last)
 
-    # VADE VE AĞIRLIKLANDIRMA (Weinstein eklendi)
+    # VADE VE AĞIRLIKLANDIRMA — AI modelinin öğrendikleri baz alınır
     is_long_vade = bool(sma200_val > 0 and close_val > sma200_val * 1.02)
-    is_mid_vade = bool(sma50_val > 0 and close_val > sma50_val * 1.01)
-    
+    is_mid_vade  = bool(sma50_val  > 0 and close_val > sma50_val  * 1.01)
+
+    # Dinamik ağırlıkları modelden al (model yoksa varsayılan değerler gelir)
+    dw = load_adaptive_weights()
+
     if is_long_vade:
         vade = "Uzun"
-        # Weinstein uzun vadide %25 etkili olsun
-        w_trend, w_dip, w_breakout, w_momentum, w_sm, w_wein = 0.30, 0.05, 0.20, 0.10, 0.10, 0.25
+        w_trend    = dw["w_trend"]    * 1.20
+        w_dip      = dw["w_dip"]      * 0.50
+        w_breakout = dw["w_breakout"] * 1.00
+        w_momentum = dw["w_momentum"] * 0.80
+        w_sm       = dw["w_sm"]       * 0.80
+        w_wein     = dw["w_wein"]     * 1.50
     elif is_mid_vade:
         vade = "Orta"
-        w_trend, w_dip, w_breakout, w_momentum, w_sm, w_wein = 0.20, 0.15, 0.20, 0.10, 0.15, 0.20
+        w_trend, w_dip, w_breakout, w_momentum, w_sm, w_wein = (
+            dw["w_trend"], dw["w_dip"], dw["w_breakout"],
+            dw["w_momentum"], dw["w_sm"], dw["w_wein"]
+        )
     else:
         vade = "Kısa"
-        if adx_val >= 25: # Trend marketi
-            w_trend, w_dip, w_breakout, w_momentum, w_sm, w_wein = 0.15, 0.05, 0.15, 0.30, 0.20, 0.15
-        else: # Yatay market
-            w_trend, w_dip, w_breakout, w_momentum, w_sm, w_wein = 0.05, 0.35, 0.10, 0.20, 0.20, 0.10
+        if adx_val >= 25:  # Trend marketi
+            w_trend    = dw["w_trend"]    * 0.70
+            w_dip      = dw["w_dip"]      * 0.30
+            w_breakout = dw["w_breakout"] * 0.90
+            w_momentum = dw["w_momentum"] * 1.50
+            w_sm       = dw["w_sm"]       * 1.30
+            w_wein     = dw["w_wein"]     * 0.80
+        else:  # Yatay market
+            w_trend    = dw["w_trend"]    * 0.30
+            w_dip      = dw["w_dip"]      * 2.00
+            w_breakout = dw["w_breakout"] * 0.70
+            w_momentum = dw["w_momentum"] * 1.00
+            w_sm       = dw["w_sm"]       * 1.00
+            w_wein     = dw["w_wein"]     * 0.60
+
+    # 1'e normalize et
+    _total = w_trend + w_dip + w_breakout + w_momentum + w_sm + w_wein
+    if _total > 0:
+        w_trend /= _total; w_dip /= _total; w_breakout /= _total
+        w_momentum /= _total; w_sm /= _total; w_wein /= _total
 
     general = clamp(
         (trend * w_trend) + (dip * w_dip) + (breakout * w_breakout) + 
@@ -531,7 +608,8 @@ def score_symbol(last: pd.Series, prev: pd.Series, conf_last: pd.Series, market:
         else: action = "🔥 YÜKSEK GÜVENLİ AL"
     elif kalite >= 50:
         decision, signal = "TRADE READY", "AL"
-        if breakout_up: action = "📈 DİRENÇ KIRILDI"
+        if is_long_term_reversal: action = "🔄 DÜŞÜŞ BİTİŞİ (TREND DÖNÜŞÜ)"
+        elif breakout_up: action = "📈 DİRENÇ KIRILDI"
         elif is_solid_bottom: action = "📉 DİPTEN DÖNÜŞ"
         else: action = "✅ ALIM İÇİN UYGUN"
     elif w_score >= 30: # Weinstein Stage 2 Entry
@@ -553,6 +631,8 @@ def score_symbol(last: pd.Series, prev: pd.Series, conf_last: pd.Series, market:
     rr = (tp1 - close_val) / risk_amt if (risk_amt > 0) else 0
 
     durumlar = []
+    if is_long_term_reversal: durumlar.append(f"🔄 DÜŞÜŞ BİTTİ (%{round(drop_pct,1)} Düşüşten Dönüş)")
+    if is_cap: durumlar.append("😱 PANİK SATIŞI (CAPITULATION) SONRASI DÖNÜŞ")
     if is_solid_bottom: durumlar.append("🚨 DİPTEN DÖNÜYOR")
     if overextend_reasons: durumlar.extend(overextend_reasons)
     if inst_bar: durumlar.append("💰 KURUMSAL GİRİŞ")
@@ -593,8 +673,31 @@ def score_symbol(last: pd.Series, prev: pd.Series, conf_last: pd.Series, market:
         dip += 15
         kalite += 5
     
+    # AI Puanı Al
+    ai_prob_raw = float(_safe_get(last, "ai_prob", 55.0))
+    
+    # --- Deneyim Bankası Filtresi (Experience Proxy - Phase 12) ---
+    # Modelin 'features' listesini bul (genelde indicators'da tanımlı olanlar)
+    feature_list = [
+        "rsi", "macd_hist", "adx", "atr_pct", "bb_width", "roc20", 
+        "ema20_slope", "vol_spike", "feat_rsi_mom", "feat_vol_atr"
+    ]
+    # Sadece mevcut olanları filtrele
+    valid_features = [f for f in feature_list if f in last.index]
+    
+    past_success = query_experience_memory(last, valid_features)
+    memory_bonus = (past_success - 0.5) * 20 # -10 ile +10 arası puan
+    
+    # Kalite puanını hafıza tecrübesiyle güncelle
+    kalite = clamp(kalite + memory_bonus)
+    
+    # --- AKILLI SERMAYE POLİTİKASI (Phase 5) ---
+    policy = TradingPolicyOptimizer()
+    pos_size = policy.calculate_position_size(ai_prob_raw / 100.0, atr_pct_val)
+
     return {
         "Vade": vade, "Kalite": round(kalite,1), "Günlük %": f"%{round(daily_return,2)}",
+        "Pozisyon": f"{pos_size}x", # Önerilen katsayı
         "Skor": round(general,1), "Smart Money Skor": round(smart_money,1),
         "Trend Skor": round(trend,1), "Dip Skor": round(dip,1), "Breakout Skor": round(breakout,1),
         "Momentum Skor": round(momentum,1), "Konsol Skor": round(konsol,1),

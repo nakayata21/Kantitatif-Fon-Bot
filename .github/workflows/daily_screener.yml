@@ -14,8 +14,10 @@ jobs:
       ACTIONS_ALLOW_USE_UNSECURE_NODE_VERSION: true
       ACTIONS_STEP_DEBUG: true
     strategy:
+      fail-fast: false
       matrix:
         market: [BIST, NASDAQ, CRYPTO]
+    timeout-minutes: 45
     steps:
       - name: Kodları Çek
         uses: actions/checkout@v4
@@ -24,13 +26,12 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: '3.9'
+          cache: 'pip'
 
       - name: Kütüphaneleri Yükle
         run: |
           python -m pip install --upgrade pip
-          pip install streamlit pandas requests yfinance ta scikit-learn numba plotly openai
-          pip install git+https://github.com/rongardF/tvdatafeed.git
-          pip install isyatirimhisse vectorbt || true
+          pip install -r requirements.txt
           
       - name: Taramayı Başlat
         env:

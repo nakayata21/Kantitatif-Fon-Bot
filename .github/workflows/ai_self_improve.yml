@@ -17,12 +17,12 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-language: '3.10'
+          python-version: '3.10'
           cache: 'pip'
 
       - name: Install dependencies
         run: |
-          pip install pandas numpy scikit-learn yfinance sqlite3
+          pip install pandas numpy scikit-learn yfinance
 
       - name: Run Trainer Service (Labeling + Training)
         run: python trainer_service.py

@@ -159,22 +159,30 @@ if __name__ == "__main__":
         try:
             # GitHub (TradingView) rate limit sorunları için worker sayısını ve bekleme süresini optimize et.
             workers_count = 1 if MARKET in ["BIST", "NASDAQ"] else 2
+            start_time = datetime.now(TR_TZ)
+            print(f"[{start_time}] Tarama basliyor... Toplam sembol: {len(symbols)}, Workers: {workers_count}")
+            
             df, errs = run_scan(symbols, MARKET, "Gunluk", delay_ms=1000, workers=workers_count)
-            print(f"DEBUG: Tarama bitti. Basarili: {len(df)}, Hata: {len(errs)}")
+            
+            end_time = datetime.now(TR_TZ)
+            duration = (end_time - start_time).total_seconds()
+            print(f"[{end_time}] Tarama bitti. Sure: {duration:.1f} saniye. Basarili: {len(df)}, Hata: {len(errs)}")
             
             message = format_telegram_message(MARKET, df, status)
             
             # Eger tarama yapildiysa ama sinyal yoksa veya hata coksa bilgi ekle
             if len(df) == 0 and len(errs) > 0:
                 message = f"🛑 *{MARKET} Tarama Hatası*\nVeri çekilemedi. Toplam {len(errs)} hata oluştu. GitHub IP engeli olabilir."
-            elif not df.empty:
-                # Yapay Zeka Yorumu Ekle
-                ai_comment = get_ai_commentary(MARKET, df)
-                if ai_comment:
-                    message += f"\n\n\U0001f9e0 *YAPAY ZEKA YORUMU:*\n{ai_comment}"
-                
                 # Ozet bilgisi ekle
-                message += f"\n\n📊 *Tarama Özeti:*\n- Toplam Sembol: {len(symbols)}\n- Başarılı: {len(df)}\n- Hata: {len(errs)}\n- Sinyal: {int((df['Sinyal'] == 'AL').sum()) if 'Sinyal' in df.columns else 0}"
+                message += f"\n\n📊 *Tarama Özeti:*\n- Toplam Sembol: {len(symbols)}\n- Başarılı: {len(df)}\n- Hata: {len(errs)}\n- Teknik Sinyal (AL): {int((df['Sinyal'] == 'AL').sum()) if 'Sinyal' in df.columns else 0}"
+                
+                # Temel Analizi Güçlü Olanları Vurgula (Veritabanından gelen verilerle)
+                if "isy_score" in df.columns:
+                    elite_stocks = df[df["isy_score"] >= 70].sort_values(by="isy_score", ascending=False).head(3)
+                    if not elite_stocks.empty:
+                        message += "\n\n💎 *Temel Analizi En Güçlü Hisseler:*"
+                        for _, row in elite_stocks.iterrows():
+                            message += f"\n- {row['Hisse']}: Puan {row['isy_score']} ({row['isy_grade']})"
             
             send_msg(message)
             print(f"[{datetime.now(TR_TZ)}] İşlem Tamamlandı. Mesaj Gönderildi!")

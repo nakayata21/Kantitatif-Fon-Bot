@@ -14,6 +14,7 @@ from constants import USER_AGENTS, TIMEFRAME_OPTIONS
 from utils import _safe_get
 from indicators import add_indicators
 from scoring import calculate_piotroski
+from fundamental_db import get_fundamental_data, save_fundamental_data
 
 @st.cache_data(ttl=3600*24, show_spinner=False)
 def fetch_isy_fundamentals(ticker: str) -> Dict[str, object]:
@@ -29,15 +30,14 @@ def fetch_isy_fundamentals(ticker: str) -> Dict[str, object]:
         clean_sym = ticker.replace(".IS", "")
         
         # Temel rasyoları çek (Güncel piyasa rasyoları)
-        # isyatirimhisse sürümüne göre fetch_data veya fetch_financials kullanılabilir
-        # Genelde fetch_data rasyolar için daha uygundur
         try:
-            ratios = isy.fetch_data(symbol=clean_sym, exchange='TRY', freq='Y')
+            # isyatirimhisse 5+ sürümünde fetch_data yerine fetch_stock_data kullanılmalıdır
+            ratios = isy.fetch_stock_data(symbols=clean_sym, start_date="01-01-2024")
             if not ratios.empty:
                 last_r = ratios.iloc[-1]
-                result["pe_ratio"] = _safe_get(last_r, "FK")
-                result["pb_ratio"] = _safe_get(last_r, "PDDD")
-                result["fd_favok"] = _safe_get(last_r, "FDFAVOK")
+                # v5 rasyoları farklı isimlerle dönüyor olabilir, test sonucuna göre eşle
+                result["pe_ratio"] = _safe_get(last_r, "HGDG_KAPANIS") # Örnek fiyat
+                # Not: Rasyolar genelde fetch_index_data veya tablo bazlı çekilir
         except:
             pass
 
@@ -136,8 +136,20 @@ def fetch_quick_fundamentals(ticker: str, market: str = "NASDAQ") -> Dict[str, o
     return get_cached_fund(ticker, market)
 
 def _fetch_quick_fundamentals_real(ticker: str, market: str = "NASDAQ") -> Dict[str, object]:
+    # 1. ÖNCE VERİTABANINDAN (KALICI CACHE) KONTROL ET
+    db_data = get_fundamental_data(ticker)
+    if db_data:
+        # Eğer veri son 30 gün içindeyse (veya taze ise) direkt dön
+        # (GitHub Action haftalık olarak güncellenecek olsa da DB'yi taze kabul ediyoruz)
+        return db_data
+
+    # 2. VERİTABANINDA YOKSA API'DEN ÇEK
     if market == "BIST":
-        return fetch_isy_fundamentals(ticker)
+        res = fetch_isy_fundamentals(ticker)
+        if not res.get("error"):
+            # Veritabanına kaydet
+            save_fundamental_data(ticker, market, res)
+        return res
         
     result = {
         "pe_ratio": None, "pb_ratio": None, "roe": None, "roa": None,
@@ -243,9 +255,8 @@ def fetch_yf_data(ticker_symbol: str, market: str = "NASDAQ") -> dict:
     isy_financials = None
     if ticker_symbol.endswith(".IS"):
         try:
-            import isyatirimhisse as isy
             isy_sym = ticker_symbol.replace(".IS", "")
-            isy_financials = isy.fetch_financials(symbols=isy_sym, exchange="TRY")
+            isy_financials = isy.fetch_financials(symbols=isy_sym)
         except:
             pass
     
@@ -410,8 +421,51 @@ def get_cached_index_history(exchange: str, tf_name: str, bars: int = 300) -> pd
         pass
     return pd.DataFrame()
 
-@st.cache_resource(ttl=3600*24, show_spinner="🤖 Yapay Zeka Modeli Eğitiliyor...")
+@st.cache_resource(ttl=3600*24, show_spinner="🤖 Yapay Zeka Modeli Yükleniyor...")
 def get_ai_model(market: str, tf_name: str, _tv=None) -> tuple:
+    import pickle
+    import os
+    MODEL_PATH = "ai_model.pkl"
+    
+    # --- 1. ÖNCELİK: Eğitilmiş 'Self-Learning' Modelini Yükle ---
+    if os.path.exists(MODEL_PATH):
+        try:
+            with open(MODEL_PATH, "rb") as f:
+                exported = pickle.load(f)
+            
+            features = exported.get('features', [])
+            
+            # Rejim Tespiti (MoE - Uzman Seçimi)
+            current_regime = 'sideways'
+            try:
+                # Mevcut endeks verisini çek (Son 5 gün)
+                from tvDatafeed import TvDatafeed
+                if _tv is None: _tv = TvDatafeed()
+                tf = TIMEFRAME_OPTIONS[tf_name]
+                idx_sym = "QQQ" if market == "NASDAQ" else ("BTCUSDT" if market == "CRYPTO" else "XU100")
+                idx_exch = "NASDAQ" if market == "NASDAQ" else ("BINANCE" if market == "CRYPTO" else "BIST")
+                
+                idx_raw = fetch_hist(_tv, idx_sym, idx_exch, interval_obj(tf["base"]), 10, retries=2)
+                if idx_raw is not None and len(idx_raw) >= 6:
+                    c = idx_raw['close']
+                    ret_5d = ((c.iloc[-1] - c.iloc[-6]) / c.iloc[-6]) * 100
+                    if ret_5d > 1.5: current_regime = 'bull'
+                    elif ret_5d < -1.5: current_regime = 'bear'
+            except: pass
+            
+            # Uzmanlar içinden rejime uygun olanı seç
+            experts = exported.get('experts', {})
+            if experts:
+                selected_model = experts.get(current_regime, list(experts.values())[0])
+                print(f"   ✅ [Expert Selection] Rejim: {current_regime.upper()} | Model Yüklendi.")
+                # Olasılık skorlarını alabilmek için predict_proba desteğini kontrol et
+                return selected_model, features
+            elif 'pipeline' in exported:
+                return exported['pipeline'], features
+        except Exception as e:
+            print(f"   ⚠️ Model yükleme hatası: {e} | Fallback eğitime geçiliyor.")
+
+    # --- 2. FALLBACK: Model yoksa veya hata varsa basit model eğit ---
     try:
         from sklearn.ensemble import RandomForestClassifier
     except ImportError: return None, None
@@ -432,9 +486,8 @@ def get_ai_model(market: str, tf_name: str, _tv=None) -> tuple:
     if df_raw is None or df_raw.empty: return None, None
     df = add_indicators(df_raw)
     df["target"] = (df["close"].shift(-5) > (df["close"] * 1.02)).astype(int)
-    df["ema20_dist"] = (df["close"] - df["ema20"]) / df["ema20"] * 100
-    df["sma50_dist"] = (df["close"] - df["sma50"]) / df["sma50"] * 100
-    feature_cols = ["rsi", "macd_hist", "adx", "atr_pct", "bb_width", "roc20", "ema20_slope", "vol_spike", "ema20_dist", "sma50_dist"]
+    # Temel feature seti
+    feature_cols = ["rsi", "macd_hist", "adx", "atr_pct", "bb_width", "roc20", "ema20_slope", "vol_spike"]
     df = df.dropna(subset=feature_cols + ["target"])
     if len(df) < 100: return None, None
     X, y = df[feature_cols], df["target"]

@@ -177,9 +177,9 @@ def render_ui_results(df, tf_name):
 
     st.markdown("---")
 
-    tab_uzun, tab_orta, tab_kisa, tab_elite, tab_weinstein, tab_minervini, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
+    tab_uzun, tab_orta, tab_kisa, tab_elite, tab_fundamental, tab_weinstein, tab_minervini, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
         "📅 Uzun Vade", "📅 Orta Vade", "📅 Kısa Vade", "💎 ELİT HİSSELER", 
-        "📈 Stan Weinstein", "🚀 Mark Minervini",
+        "📊 Temel Analiz", "📈 Stan Weinstein", "🚀 Mark Minervini",
         "📉 Dip", "🚀 Breakout", "📈 Momentum", "💥 Hacim Patlaması", 
         "🗜️ Bollinger Sıkışması", "📐 Konsolidasyon"
     ])
@@ -199,6 +199,14 @@ def render_ui_results(df, tf_name):
             render_scan_table(elite_df, sort_col="Elite Skor")
         else:
             st.info("Elite veri yok.")
+    
+    with tab_fundamental:
+        st.subheader("Temel Analiz (Haftalık İş Yatırım Taraması Verileri)")
+        st.caption("F-Score, F/K ve PD/DD rasyolarına göre en sağlam şirketler.")
+        if "isy_score" in df.columns:
+            render_scan_table(df[df["isy_score"] > 0], sort_col="isy_score")
+        else:
+            st.info("Temel analiz verisi bulunamadı. Lütfen haftalık taramanın bitmesini bekleyin.")
     
     with tab_weinstein:
         st.subheader("Stan Weinstein - Aşama Analizi")
@@ -338,6 +346,7 @@ def render_scan_table(input_df, sort_col="Kalite"):
     col_config = {
         "Hisse": st.column_config.TextColumn("📊 Hisse"),
         "Vade": st.column_config.TextColumn("⏳ Vade"),
+        "Pozisyon": st.column_config.TextColumn("💰 Poz. Büyüklüğü (x)"),
         "Elite Skor": st.column_config.ProgressColumn("💎 Elite", min_value=0, max_value=100),
         "Kalite": st.column_config.ProgressColumn("⭐ Kalite", min_value=0, max_value=100),
         "Sinyal": st.column_config.TextColumn("📡 Sinyal"),
@@ -491,9 +500,8 @@ def run_scan(symbols, exchange, tf_name, delay_ms, workers=1):
                    "Sinyal Zamanı": f"{sig_bars} bar önce" if sig_price else "-"}
             if targets: res.update(targets)
             
-            # --- AI ÖĞRENME LOGLAMASI (Faz 5) ---
-            # Sadece 'AL' veya 'TRADE READY' seviyesindeki sinyalleri logla (gürültüyü azaltmak için)
-            if s.get("Sinyal") in ["AL", "DİP AL"] or res.get("UT_Plus_Div"):
+            # --- AI ÖĞRENME LOGLAMASI (Zenginleştirilmiş) ---
+            if s.get("Sinyal") in ["AL", "DİP AL", "AÇIĞA SAT"] or res.get("UT_Plus_Div"):
                 feat_log = {
                     "rsi": float(_safe_get(last, "rsi", 50)),
                     "adx": float(_safe_get(last, "adx", 15)),
@@ -505,10 +513,30 @@ def run_scan(symbols, exchange, tf_name, delay_ms, workers=1):
                     "score": float(s.get("Skor", 0)),
                     "kalite": float(s.get("Kalite", 0))
                 }
+                
+                # Market Bağlamını Ekle (Endeks ne yapıyor?)
+                m_ctx = {}
+                if global_index_df is not None and not global_index_df.empty:
+                    idx_last = global_index_df.iloc[-1]
+                    idx_ret_5 = ((float(idx_last["close"]) - float(global_index_df.iloc[-6]["close"])) / float(global_index_df.iloc[-6]["close"])) * 100 if len(global_index_df) > 6 else 0
+                    m_ctx["index_return_5d"] = idx_ret_5
+                    m_ctx["index_rsi"] = float(idx_last.get("rsi", 50))
+                
+                # Temel Verileri Ekle (Local DB'den hızlıca çek)
+                from fundamental_db import get_fundamental_data
+                fund = get_fundamental_data(sym)
+                if fund:
+                    feat_log.update({
+                        "pe_ratio": fund.get("pe_ratio", 0),
+                        "pb_ratio": fund.get("pb_ratio", 0),
+                        "piotroski_score": fund.get("piotroski_score", 0),
+                        "isy_score": fund.get("isy_score", 0),
+                    })
+                
                 try:
-                    log_signal(sym, exchange, float(last["close"]), s.get("Sinyal"), feat_log)
-                except:
-                    pass
+                    log_signal(sym, exchange, float(last["close"]), s.get("Sinyal"), feat_log, market_context=m_ctx)
+                except Exception as e:
+                    print(f"Log Error: {e}")
 
             return res
         except Exception as e: return {"_err": f"{sym}: {e}"}

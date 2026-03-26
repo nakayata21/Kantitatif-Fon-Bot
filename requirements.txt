@@ -12,3 +12,5 @@ plotly
 git+https://github.com/rongardF/tvdatafeed.git
 openai
 pytz
+xgboost
+optuna
