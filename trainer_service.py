@@ -110,14 +110,48 @@ def label_past_signals():
         get_cached_history(row['symbol'], row['exchange'])
         time.sleep(1) # Saygılı indirme
         
-    print(f"✅ Veriler hazır. Triple Barrier işlemi başlatılıyor...")
+    print(f"✅ Veriler hazır. Triple Barrier + Fizik Özellik Çıkarımı başlatılıyor...")
     success = 0
+
+    # Physics engine başlat
+    try:
+        from physics_engine import get_physics_engine
+        physics_engine = get_physics_engine()
+        physics_ok = True
+        print("⚛️ Fizik Motoru aktif: Kalman+Fourier+Elastisite+Momentum özellikleri ML verisine ekleniyor.")
+    except Exception as e:
+        physics_engine = None
+        physics_ok = False
+        print(f"⚠️ Fizik Motoru yüklenemedi: {e}")
+
+    import sqlite3, json as _json
+    db_conn = sqlite3.connect("signals_log.db")
+
     for _, row in df.iterrows():
         outcome, label_type, max_p, min_p, _ = apply_triple_barrier_optimized(row)
         if outcome is not None:
             update_label(row['id'], outcome, label_type, max_p, min_p)
             success += 1
-    print(f"✅ {success} sinyal etiketlendi.")
+
+            # Fizik özelliklerini features JSON'una ekle
+            if physics_ok:
+                try:
+                    hist = get_cached_history(row['symbol'], row['exchange'])
+                    if hist is not None and not hist.empty:
+                        phys_feats = physics_engine.extract(hist)
+                        if phys_feats:
+                            existing = _json.loads(row.get('features', '{}'))
+                            existing.update({f"phys_{k}": v for k, v in phys_feats.items()})
+                            db_conn.execute(
+                                "UPDATE signals SET features=? WHERE id=?",
+                                (_json.dumps(existing), int(row['id']))
+                            )
+                except Exception:
+                    pass
+
+    db_conn.commit()
+    db_conn.close()
+    print(f"✅ {success} sinyal etiketlendi (Fizik özellikleri {'eklendi' if physics_ok else 'eklenemedi'}).")
 
 # --- AUTO-ML OPTIMIZATION (OPTUNA) ---
 

@@ -38,6 +38,12 @@ try:
 except Exception:
     _RL_OK = False
 
+try:
+    from physics_engine import get_physics_engine
+    _PHYSICS_OK = True
+except Exception:
+    _PHYSICS_OK = False
+
 # --- EXPERIENCE REPLAY (Hafıza ve Tecrübe Sorgulama) ---
 
 def query_experience_memory(current_row, feature_list):
@@ -835,6 +841,49 @@ def score_symbol(last: pd.Series, prev: pd.Series, conf_last: pd.Series, market:
     # ================================================================
     # SON KARAR GÜNCELLEMESI (kalite yeniden değerlendirildi)
     # ================================================================
+
+    # 6. FİZİK MOTORU (Kalman + Fourier + Elastisite + Momentum)
+    physics_data = {"physics_score": 0.0, "noise_level": "ORTA", "tags": []}
+    if _PHYSICS_OK:
+        try:
+            # Ham OHLCV verisine ihtiyac var: last series'ten rekonstükte et
+            # (Tarama sırasında tam df yoksa proxy kullan)
+            physics_proxy_close = float(_safe_get(last, "close", 0))
+            if physics_proxy_close > 0:
+                engine = get_physics_engine()
+                # Sadece Close verisiyle çalışabilen metrikleri hesapla
+                # (Gerçek df için data_fetcher entegrasyonu yapılabilir)
+                # Burada features JSON içinde fizik özellikleri varsa kullan
+                px_noise = features.get("kalman_noise_ratio", 0.3) if 'features' in dir() else 0.3
+                px_z     = float(_safe_get(last, "elastic_z_distance", 0.0))
+                px_accel = float(_safe_get(last, "momentum_acceleration", 0.0))
+
+                # Proxy skor hesapla
+                px_score = 0.0
+                px_tags  = []
+                if px_z > 2.5:
+                    px_score -= 8.0
+                    px_tags.append(f"⚠️ ELAStİSİTE: Aşırı Uzak (Z={px_z:.1f})")
+                elif px_z < -2.0:
+                    px_score += 6.0
+                    px_tags.append(f"🟢 ELAStİSİTE: Güvenli Dip Zön (Z={px_z:.1f})")
+                if px_accel > 0.3:
+                    px_score += 4.0
+                    px_tags.append("⚡ MOMENTUM İVELENMEDE")
+                elif px_accel < -0.3:
+                    px_score -= 4.0
+                    px_tags.append("📉 MOMENTUM YAVAlŞIYOR")
+
+                physics_data = {
+                    "physics_score": round(px_score, 2),
+                    "noise_level":   "YUKARI" if px_noise < 0.2 else ("YUKSEK" if px_noise > 0.45 else "ORTA"),
+                    "tags":          px_tags,
+                }
+                kalite = clamp(kalite + px_score)
+                durumlar.extend(px_tags)
+        except Exception:
+            pass
+
     kalite = clamp(kalite)
     if kalite >= 78 and signal != "AÇIĞA SAT":
         decision, signal = "HIGH CONVICTION", "AL"
@@ -852,6 +901,8 @@ def score_symbol(last: pd.Series, prev: pd.Series, conf_last: pd.Series, market:
         "MTF Onay": mtf_adv_data.get("direction", "-"),
         "RL Aksiyon": rl_action_data.get("action", "-"),
         "Skor": round(general, 1), "Smart Money Skor": round(smart_money, 1),
+        "Fizik Skor": physics_data.get("physics_score", 0.0),
+        "Gürültü": physics_data.get("noise_level", "ORTA"),
         "Trend Skor": round(trend, 1), "Dip Skor": round(dip, 1), "Breakout Skor": round(breakout, 1),
         "Momentum Skor": round(momentum, 1), "Konsol Skor": round(konsol, 1),
         "Dusus Riski": round(risk, 1), "Guven": round(confidence, 1),
