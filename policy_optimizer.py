@@ -1,10 +1,8 @@
 """
 policy_optimizer.py
 
-Bu modül, AI modelinin güven skoru ile piyasa oynaklığını birleştirerek
-'İdeal Pozisyon Büyüklüğü' katsayısını hesaplar. 
-
-Kendi kendini optimize eden bir Policy Network mantığıyla çalışır.
+AI Güven Skoru + Kelly Criterion → İdeal Pozisyon Büyüklüğü
+Volatility-Adjusted Risk Rebalancing dahil.
 """
 
 import numpy as np
@@ -13,9 +11,10 @@ import os
 
 POLICY_CONFIG_PATH = "policy_config.json"
 
+
 class TradingPolicyOptimizer:
     def __init__(self, path=POLICY_CONFIG_PATH):
-        self.path = path
+        self.path   = path
         self.config = self._load_config()
 
     def _load_config(self):
@@ -23,75 +22,148 @@ class TradingPolicyOptimizer:
             with open(self.path, "r") as f:
                 return json.load(f)
         return {
-            "confidence_weight": 1.5,   # Güven skoru çarpanı
-            "volatility_penalty": 0.8, # Oynaklık cezası
-            "drawdown_limit": 5.0,     # Max kabul edilebilir düşüş %
-            "base_unit": 1.0           # Standart pozisyon büyüklüğü
+            "max_kelly_fraction": 0.25,   # Maksimum kasanın %25'i (güvenli Kelly)
+            "volatility_cap":     0.30,   # ATR > %30 → İşlem yok
+            "drawdown_limit":     10.0,   # Portföy %10 eridiyse → İşlem yok
+            "base_unit":          1.0,
         }
 
     def save_config(self):
         with open(self.path, "w") as f:
             json.dump(self.config, f, indent=4)
 
-    def calculate_position_size(self, ai_confidence, atr_pct, current_drawdown=0.0):
+    # ------------------------------------------------------------------ #
+    # KELLY CRITERION
+    # ------------------------------------------------------------------ #
+
+    def kelly_fraction(self, win_rate: float, avg_win_pct: float, avg_loss_pct: float) -> float:
         """
-        AI Güven Skoru + Volatilite + Portföy Durumu -> Birleşik Pozisyon Katsayısı
+        f* = (p * b - q) / b
+        p  = win_rate
+        q  = 1 - win_rate
+        b  = avg_win / avg_loss
         """
-        # 1. Base Multiplier (Kelly Criterion benzeri mantık)
-        # confidence: 0.0 - 1.0 arası
-        conf_mult = (ai_confidence * self.config["confidence_weight"]) - 0.5
-        
-        # 2. Volatilite Ayarı (Aşırı oynaklıkta vites küçült)
-        # atr_pct: Hissenin % bazlı günlük ortalama hareketi
-        vol_mult = 1.0
-        if atr_pct > 5.0:  # %5'ten fazla oynaklık
-            vol_mult = 1.0 - (atr_pct * 0.05 * self.config["volatility_penalty"])
-        
-        # 3. Drawdown Koruması (Portföy eriyorsa risk azalt)
-        dd_mult = 1.0
+        if avg_loss_pct <= 0:
+            return 0.0
+        b = abs(avg_win_pct) / abs(avg_loss_pct)
+        f = (win_rate * b - (1 - win_rate)) / b
+        # Half-Kelly güvenlik marjı
+        f_half = f * 0.5
+        return max(0.0, min(self.config["max_kelly_fraction"], round(f_half, 3)))
+
+    # ------------------------------------------------------------------ #
+    # ANA POZİSYON BÜYÜKLÜĞÜ
+    # ------------------------------------------------------------------ #
+
+    def calculate_position_size(self, ai_confidence: float, atr_pct: float,
+                                 current_drawdown: float = 0.0,
+                                 win_rate: float = 0.55,
+                                 avg_win: float = 5.0,
+                                 avg_loss: float = 3.0) -> dict:
+        """
+        Kelly + Volatilite + Drawdown korumalarını birleştirir.
+        Returns: {"size": float, "kelly_f": float, "reason": str}
+        """
+        reason_parts = []
+
+        # 1. Drawdown Koruması
         if current_drawdown > self.config["drawdown_limit"]:
-            dd_mult = 1.0 - (current_drawdown / 100.0)
-            
-        position_size = self.config["base_unit"] * conf_mult * vol_mult * dd_mult
-        
-        # Sınırlar: 0.0 (Girme) ile 2.0 (Kaldıraçlı girilebilir) arası
-        return max(0.0, min(2.0, round(position_size, 2)))
+            return {"size": 0.0, "kelly_f": 0.0, "size_pct": 0.0, "label": "GEÇIN",
+                    "reason": f"Drawdown limiti aşıldı (%{current_drawdown:.1f})"}
 
-    def self_improve_policy(self, trade_history):
-        """
-        Geçmiş işlemleri simüle ederek katsayıları (weights) optimize eder.
-        """
-        if len(trade_history) < 20: 
-            return "⚠️ Yetersiz veri (Min 20 işlem)."
+        # 2. Volatilite Üst Sınırı
+        if atr_pct > self.config["volatility_cap"] * 100:
+            return {"size": 0.0, "kelly_f": 0.0, "size_pct": 0.0, "label": "GEÇIN",
+                    "reason": f"Aşırı volatilite (%{atr_pct:.1f} ATR)"}
 
-        best_reward = -99999
-        best_params = self.config.copy()
-        
-        print("\n🏦 Sermaye Politikası Optimizasyonu (Monte Carlo Simulation)...")
-        # Basit bir deneme-yanılma (Policy Search) simülasyonu
-        for _ in range(100):
-            # Rastgele yeni politika adayları üret
-            trial_conf_w = self.config["confidence_weight"] + np.random.uniform(-0.5, 0.5)
-            trial_vol_p = self.config["volatility_penalty"] + np.random.uniform(-0.2, 0.2)
-            
-            simulated_pnl = 0
-            for trade in trade_history:
-                # Trade: {'conf': 0.65, 'atr': 3.2, 'return': 5.2}
-                size = (trade['conf'] * trial_conf_w - 0.5) * (1.0 - (trade['atr'] * 0.05 * trial_vol_p))
-                size = max(0.0, min(2.0, size))
-                simulated_pnl += size * trade['return']
-            
-            if simulated_pnl > best_reward:
-                best_reward = simulated_pnl
-                best_params["confidence_weight"] = trial_conf_w
-                best_params["volatility_penalty"] = trial_vol_p
-        
-        self.config = best_params
+        # 3. Kelly Fraksiyonu
+        kelly_f = self.kelly_fraction(win_rate, avg_win, avg_loss)
+        reason_parts.append(f"Kelly={kelly_f:.2f}")
+
+        # 4. AI Güven Ayarı
+        conf_scale = max(0.0, (ai_confidence - 0.4) / 0.6)
+        reason_parts.append(f"Conf={ai_confidence:.2f}")
+
+        # 5. Volatilite Ölçeği
+        vol_scale  = max(0.3, 1.0 - (atr_pct / 20.0))
+        reason_parts.append(f"VolScale={vol_scale:.2f}")
+
+        size = kelly_f * conf_scale * vol_scale
+        size = round(max(0.0, min(self.config["max_kelly_fraction"], size)), 3)
+
+        size_pct = size * 100
+        if size_pct < 2:
+            label = "COK KUCUK - Gecin"
+        elif size_pct < 8:
+            label = f"Kucuk Giris (%{size_pct:.0f})"
+        elif size_pct < 18:
+            label = f"Normal Giris (%{size_pct:.0f})"
+        else:
+            label = f"Buyuk Giris (%{size_pct:.0f})"
+
+        return {
+            "size":     size,
+            "size_pct": round(size_pct, 1),
+            "kelly_f":  kelly_f,
+            "label":    label,
+            "reason":   " | ".join(reason_parts),
+        }
+
+    # ------------------------------------------------------------------ #
+    # VOLATİLİTE BAZLI REBALANCİNG ÖNERİSİ
+    # ------------------------------------------------------------------ #
+
+    def rebalance_signal(self, portfolio_atr_avg: float, market_vix_proxy: float) -> dict:
+        risk_level = 0
+        actions    = []
+
+        if portfolio_atr_avg > 5.0:
+            risk_level += 1
+            actions.append("Yüksek volatiliteli hisselerin boyutunu küçült")
+
+        if market_vix_proxy > 3.0:
+            risk_level += 1
+            actions.append("Piyasa geneli volatilite yüksek → Nakit oranını artır")
+
+        if risk_level >= 2:
+            action = "KUCULT"
+        elif risk_level == 1:
+            action = "IZLE"
+        else:
+            action = "NORMAL"
+
+        return {"action": action, "risk_level": risk_level, "suggestions": actions}
+
+    # ------------------------------------------------------------------ #
+    # KENDİNİ OPTİMİZE ETME
+    # ------------------------------------------------------------------ #
+
+    def self_improve_policy(self, trade_history: list) -> str:
+        if len(trade_history) < 20:
+            return "Yetersiz veri (min 20 islem)"
+
+        wins    = [t for t in trade_history if t.get("return", 0) > 0]
+        losses  = [t for t in trade_history if t.get("return", 0) <= 0]
+
+        if not wins or not losses:
+            return "Heterojen sonuclar yetersiz"
+
+        win_rate = len(wins) / len(trade_history)
+        avg_win  = float(np.mean([t["return"] for t in wins]))
+        avg_loss = float(np.mean([abs(t["return"]) for t in losses]))
+
+        new_kelly = self.kelly_fraction(win_rate, avg_win, avg_loss)
+        self.config["max_kelly_fraction"] = max(0.05, min(0.30, new_kelly))
         self.save_config()
-        return "✅ Politika Optimize Edildi."
+
+        return (f"Politika Guncellendi: Kelly={new_kelly:.3f} | "
+                f"WinRate=%{win_rate*100:.1f} | AvgWin={avg_win:.1f}% | AvgLoss={avg_loss:.1f}%")
+
 
 if __name__ == "__main__":
     opt = TradingPolicyOptimizer()
-    # Örnek hesaplama: %70 güven, %4 volatilite
-    size = opt.calculate_position_size(0.70, 4.0)
-    print(f"Önerilen Pozisyon Büyüklüğü: {size}x")
+    result = opt.calculate_position_size(
+        ai_confidence=0.72, atr_pct=4.2,
+        win_rate=0.58, avg_win=5.5, avg_loss=3.0
+    )
+    print(result)

@@ -7,6 +7,37 @@ import pickle
 import os
 from typing import Dict, Tuple
 
+# --- YENİ AI MODÜLLERİ (Güvenli İmport — hata olursa atlıyoruz) ---
+try:
+    from sentiment_analyzer import get_full_sentiment
+    _SENTIMENT_OK = True
+except Exception:
+    _SENTIMENT_OK = False
+
+try:
+    from correlation_network import get_leading_signal, get_dominant_stocks
+    _CORR_OK = True
+except Exception:
+    _CORR_OK = False
+
+try:
+    from order_flow import get_order_flow_score
+    _ORDER_FLOW_OK = True
+except Exception:
+    _ORDER_FLOW_OK = False
+
+try:
+    from multi_timeframe import get_multi_timeframe_confirmation
+    _MTF_ADV_OK = True
+except Exception:
+    _MTF_ADV_OK = False
+
+try:
+    from rl_policy import get_rl_agent
+    _RL_OK = True
+except Exception:
+    _RL_OK = False
+
 # --- EXPERIENCE REPLAY (Hafıza ve Tecrübe Sorgulama) ---
 
 def query_experience_memory(current_row, feature_list):
@@ -691,20 +722,142 @@ def score_symbol(last: pd.Series, prev: pd.Series, conf_last: pd.Series, market:
     # Kalite puanını hafıza tecrübesiyle güncelle
     kalite = clamp(kalite + memory_bonus)
     
-    # --- AKILLI SERMAYE POLİTİKASI (Phase 5) ---
-    policy = TradingPolicyOptimizer()
-    pos_size = policy.calculate_position_size(ai_prob_raw / 100.0, atr_pct_val)
+    # --- AKILLI SERMAYE POLİTİKASI — Kelly Criterion ---
+    policy     = TradingPolicyOptimizer()
+    pos_result = policy.calculate_position_size(
+        ai_confidence   = ai_prob_raw / 100.0,
+        atr_pct         = atr_pct_val,
+        current_drawdown = 0.0,
+    )
+    pos_label  = pos_result.get("label", f"{pos_result.get('size', 0.0):.2f}x")
+
+    # ================================================================
+    # 6 YENİ AI MODÜLÜ — Her biri bağımsız ve hata-toleranslı
+    # ================================================================
+
+    # 1. DUYGU ANALİZİ (KAP + Haber Tansiyonu)
+    sentiment_data = {"composite": 0.0, "kap_score": 0.0, "news_volume": 0}
+    if _SENTIMENT_OK:
+        try:
+            symbol_name = str(_safe_get(last, "symbol", ""))
+            if symbol_name:
+                s = get_full_sentiment(symbol_name)
+                sentiment_data = s
+                sent_bonus = s["composite"] * 8      # Max ±8 puan
+                kalite = clamp(kalite + sent_bonus)
+                if s["composite"] > 0.3:
+                    durumlar.append(f"📰 POZİTİF KAP/HABER (+{s['news_volume']} başlık)")
+                elif s["composite"] < -0.3:
+                    durumlar.append(f"📰 NEGATİF KAP/HABER ({s['news_volume']} başlık)")
+        except Exception:
+            pass
+
+    # 2. KORELASYON / ÖNCÜ SİNYAL (Lokomotif Hisseler)
+    leading_signal = 0.0
+    if _CORR_OK:
+        try:
+            from constants import DEFAULT_BIST_30
+            dom  = [d["symbol"] for d in get_dominant_stocks(DEFAULT_BIST_30, top_n=5)]
+            sym  = str(_safe_get(last, "symbol", ""))
+            if sym and dom:
+                leading_signal = get_leading_signal(sym, dom)
+                lead_bonus     = leading_signal * 6   # Max ±6 puan
+                kalite = clamp(kalite + lead_bonus)
+                if leading_signal > 0.3:
+                    durumlar.append(f"🕸️ ÖNCÜ HİSSELER POZİTİF (Lead={leading_signal:+.2f})")
+                elif leading_signal < -0.3:
+                    durumlar.append(f"🕸️ ÖNCÜ HİSSELER NEGATİF (Lead={leading_signal:+.2f})")
+        except Exception:
+            pass
+
+    # 3. EMİR AKIŞI & MİKROYAPI (Smart Money + Hacim Anomalisi)
+    order_flow_data = {"composite": 0.0, "volume_sig": "NORMAL", "liquidity": "ORTA"}
+    if _ORDER_FLOW_OK:
+        try:
+            # Mevcut df yoksa last'tan proxy oluştur — scoring ham df almıyor
+            # Bilgiler last series içinden çekiliyor
+            of_vol_z  = float(_safe_get(last, "vol_spike", 0.0)) / 3.0   # Normalize
+            of_smart  = float(_safe_get(last, "Smart Money Skor", 0.0)) / 100.0 - 0.5
+            of_comp   = (of_vol_z + of_smart) / 2.0
+            of_comp   = max(-1.0, min(1.0, of_comp))
+            order_flow_data["composite"] = round(of_comp, 3)
+            of_bonus  = of_comp * 5
+            kalite = clamp(kalite + of_bonus)
+            if of_comp > 0.4:
+                durumlar.append(f"📊 SMART MONEY GİRİŞİ (MF={of_comp:+.2f})")
+            elif of_comp < -0.4:
+                durumlar.append(f"📊 SMART MONEY ÇIKIŞI (MF={of_comp:+.2f})")
+        except Exception:
+            pass
+
+    # 4. ÇOKLU ZAMAN DİLİMİ ONAYI (1H+4H+1D)
+    mtf_adv_data = {"confirmed": False, "direction": "KARIŞIK", "confidence_add": 0.0}
+    if _MTF_ADV_OK:
+        try:
+            sym  = str(_safe_get(last, "symbol", ""))
+            exch = "BIST" if market == "BIST" else ("BINANCE" if market == "CRYPTO" else "NASDAQ")
+            if sym:
+                mtf_adv_data = get_multi_timeframe_confirmation(sym, exch)
+                kalite = clamp(kalite + mtf_adv_data["confidence_add"])
+                if mtf_adv_data["confirmed"]:
+                    if mtf_adv_data["direction"] == "YUKARI":
+                        durumlar.append(f"🌀 MTF ONAYI: 3 TF YUKARI ✅")
+                    elif mtf_adv_data["direction"] == "ASAGI":
+                        durumlar.append(f"🌀 MTF ONAYI: 3 TF AŞAĞI ⚠️")
+                else:
+                    durumlar.append("🌀 MTF: Karışık (Bir TF Uyumsuz)")
+        except Exception:
+            pass
+
+    # 5. RL POLİTİKA KARARI (Q-Learning Ajanı)
+    rl_action_data = {"action": "AL", "pos_size": 0.0, "q_vals": []}
+    if _RL_OK:
+        try:
+            agent    = get_rl_agent()
+            regime   = "bull" if kalite > 60 else ("bear" if kalite < 35 else "sideways")
+            rl_dec   = agent.choose_action(
+                regime       = regime,
+                rsi          = float(_safe_get(last, "rsi", 50)),
+                trend_score  = leading_signal,
+                ai_conf      = ai_prob_raw / 100.0,
+                greedy       = True,
+            )
+            rl_action_data = rl_dec
+            # RL'nin açıkça "İŞLEM_YOK" demesi sinyali zayıflatır
+            if rl_dec["action"] == "İŞLEM_YOK" and signal == "AL":
+                kalite = clamp(kalite - 12)
+                durumlar.append("🧬 RL AJAN: İşlem Önermiyor")
+            elif rl_dec["action"] in ("AL", "KÜÇÜK_AL") and signal == "AL":
+                durumlar.append(f"🧬 RL AJAN: {rl_dec['action']} Onayı")
+        except Exception:
+            pass
+
+    # ================================================================
+    # SON KARAR GÜNCELLEMESI (kalite yeniden değerlendirildi)
+    # ================================================================
+    kalite = clamp(kalite)
+    if kalite >= 78 and signal != "AÇIĞA SAT":
+        decision, signal = "HIGH CONVICTION", "AL"
+    elif kalite < 35 and signal == "AL":
+        decision, signal = "WATCHLIST", "BEKLE"
 
     return {
-        "Vade": vade, "Kalite": round(kalite,1), "Günlük %": f"%{round(daily_return,2)}",
-        "Pozisyon": f"{pos_size}x", # Önerilen katsayı
-        "Skor": round(general,1), "Smart Money Skor": round(smart_money,1),
-        "Trend Skor": round(trend,1), "Dip Skor": round(dip,1), "Breakout Skor": round(breakout,1),
-        "Momentum Skor": round(momentum,1), "Konsol Skor": round(konsol,1),
-        "Dusus Riski": round(risk,1), "Guven": round(confidence,1),
+        "Vade": vade, "Kalite": round(kalite, 1), "Günlük %": f"%{round(daily_return, 2)}",
+        "Pozisyon": pos_label,
+        "Kelly %": pos_result.get("size_pct", 0.0),
+        "KAP Skor": round(sentiment_data.get("composite", 0.0), 2),
+        "Haber Tansiyonu": sentiment_data.get("news_volume", 0),
+        "Lead Sinyal": round(leading_signal, 2),
+        "Order Flow": round(order_flow_data.get("composite", 0.0), 2),
+        "MTF Onay": mtf_adv_data.get("direction", "-"),
+        "RL Aksiyon": rl_action_data.get("action", "-"),
+        "Skor": round(general, 1), "Smart Money Skor": round(smart_money, 1),
+        "Trend Skor": round(trend, 1), "Dip Skor": round(dip, 1), "Breakout Skor": round(breakout, 1),
+        "Momentum Skor": round(momentum, 1), "Konsol Skor": round(konsol, 1),
+        "Dusus Riski": round(risk, 1), "Guven": round(confidence, 1),
         "Decision": decision, "Sinyal": signal, "Aksiyon": action,
-        "Fiyat": close_val, "Stop Loss": round(stop,4), "Hedef 1": round(tp1,4), "Hedef 2": round(tp2,4), "Hedef 3": round(tp3,4),
-        "R/R": round(rr,2), "Likidite": "✅ UYGUN" if is_liquid else "🚫 SIĞ",
+        "Fiyat": close_val, "Stop Loss": round(stop, 4), "Hedef 1": round(tp1, 4), "Hedef 2": round(tp2, 4), "Hedef 3": round(tp3, 4),
+        "R/R": round(rr, 2), "Likidite": "✅ UYGUN" if is_liquid else "🚫 SIĞ",
         "Özel Durum": " | ".join(durumlar) if durumlar else "-",
         "Para Akışı (MFI)": round(mfi_val, 1),
         "OBV Durumu": "📈 Artıyor" if _safe_get(last, "obv", 0) > _safe_get(prev, "obv", 0) else "📉 Azalıyor",
@@ -712,7 +865,7 @@ def score_symbol(last: pd.Series, prev: pd.Series, conf_last: pd.Series, market:
         "Weinstein": w_stage_tag,
         "Trend Sablonu": "✅ GÜÇLÜ (MINERVINI)" if is_minervini else "-",
         "UT_Bot_Al": is_ut_strong,
-        "UT_Plus_Div": ut_plus_div
+        "UT_Plus_Div": ut_plus_div,
     }
 
 def score_weinstein(last: pd.Series, conf_last: pd.Series) -> Tuple[float, str, str]:
