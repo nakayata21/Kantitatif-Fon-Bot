@@ -8,6 +8,7 @@ multi_timeframe.py
 
 import pandas as pd
 import numpy as np
+from typing import Optional
 
 try:
     from tvDatafeed import TvDatafeed, Interval
@@ -21,7 +22,7 @@ import datetime as _dt
 _MTF_TTL_MINUTES = 30
 
 
-def _get_tv(symbol: str, exchange: str, interval, n_bars: int) -> pd.DataFrame | None:
+def _get_tv(symbol: str, exchange: str, interval, n_bars: int) -> Optional[pd.DataFrame]:
     if _TV is None:
         return None
     try:
@@ -38,7 +39,7 @@ def _ema(series, span):
     return series.ewm(span=span, adjust=False).mean()
 
 
-def _analyze_tf(df: pd.DataFrame | None) -> dict:
+def _analyze_tf(df: Optional[pd.DataFrame]) -> dict:
     """Tek bir zaman dilimine ait trend yönünü analiz eder."""
     if df is None or df.empty or len(df) < 50:
         return {"trend": "NÖTR", "score": 0.0}

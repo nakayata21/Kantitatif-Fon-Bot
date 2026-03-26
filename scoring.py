@@ -44,6 +44,18 @@ try:
 except Exception:
     _PHYSICS_OK = False
 
+try:
+    from anomaly_detector import get_anomaly_detector
+    _ANOMALY_OK = True
+except Exception:
+    _ANOMALY_OK = False
+
+try:
+    from bayesian_uncertainty import get_bayesian_validator
+    _BAYESIAN_OK = True
+except Exception:
+    _BAYESIAN_OK = False
+
 # --- EXPERIENCE REPLAY (Hafıza ve Tecrübe Sorgulama) ---
 
 def query_experience_memory(current_row, feature_list):
@@ -883,7 +895,59 @@ def score_symbol(last: pd.Series, prev: pd.Series, conf_last: pd.Series, market:
                 durumlar.extend(px_tags)
         except Exception:
             pass
+    # 7. ANOMALİ DEDEKTÖRü (Autoencoder — Tahtacı/Balina Koruması)
+    anomaly_data   = {"is_anomaly": False, "severity": "NORMAL", "anomaly_norm_score": 0.0}
+    anomaly_blocked = False
+    if _ANOMALY_OK:
+        try:
+            detector = get_anomaly_detector()
+            if detector.model is not None:  # Model eğitilmişse kullan
+                safe, reason = detector.is_safe_to_trade(last)
+                anom_det     = detector.detect(last)
+                anomaly_data = anom_det
+                if not safe:
+                    anomaly_blocked = True
+                    # Manipülatif hisse — AL sinyalini blokla
+                    if signal == "AL":
+                        signal   = "BEKLE"
+                        decision = "WATCHLIST"
+                        kalite   = clamp(kalite - 25)
+                    durumlar.append(f"🚨 ANOMALİ ENGELİ: {anom_det['severity']} (Skor={anom_det['anomaly_norm_score']:.0f})")
+                elif anom_det["anomaly_norm_score"] > 60:
+                    durumlar.append(f"⚠️ Şüpheli Hacim-Fiyat Davranışı (Skor={anom_det['anomaly_norm_score']:.0f})")
+        except Exception:
+            pass
 
+    # 8. BAYESIAN BELİRSİZLİK ÖLÇÜMÜ (MC Dropout + Dinamik Kelly)
+    bayesian_data = {
+        "bayesian_prob": ai_prob_raw / 100.0, "uncertainty": 0.3,
+        "kelly_pct": pos_result.get("size_pct", 0.0),
+        "kelly_label": pos_label, "signal_grade": "B", "kelly_reduction": 0.0
+    }
+    if _BAYESIAN_OK and not anomaly_blocked:
+        try:
+            validator    = get_bayesian_validator()
+            feat_names   = ["rsi", "macd_hist", "adx", "atr_pct", "bb_width",
+                            "roc20", "ema20_slope", "vol_spike"]
+            bk           = pos_result.get("size", 0.05)
+            regime_str   = "bull" if kalite > 60 else ("bear" if kalite < 35 else "sideways")
+            bay_result   = validator.validate(last, feat_names, bk, regime_str)
+            bayesian_data = bay_result
+
+            # Bayesian kelly, standart kelly'yi override eder
+            if bay_result["kelly_pct"] < pos_result.get("size_pct", 0):
+                pos_label = bay_result["kelly_label"]
+
+            # Güven durumu tags
+            if bay_result["is_confident"] and bay_result["bayesian_prob"] > 0.65:
+                durumlar.append(f"🧠 BAYESIAN: {bay_result['signal_grade']} — Yüksek Güven")
+            elif bay_result["uncertainty"] > 0.45:
+                durumlar.append(f"🧠 BAYESIAN: {bay_result['signal_grade']} — Belirsizlik Yüksek (%{bay_result['kelly_reduction']:.0f} Kelly Kesintisi)")
+                kalite = clamp(kalite - 8)
+        except Exception:
+            pass
+
+    # Son karar güncellemesi
     kalite = clamp(kalite)
     if kalite >= 78 and signal != "AÇIĞA SAT":
         decision, signal = "HIGH CONVICTION", "AL"
@@ -900,6 +964,12 @@ def score_symbol(last: pd.Series, prev: pd.Series, conf_last: pd.Series, market:
         "Order Flow": round(order_flow_data.get("composite", 0.0), 2),
         "MTF Onay": mtf_adv_data.get("direction", "-"),
         "RL Aksiyon": rl_action_data.get("action", "-"),
+        "Bayesian Prob": bayesian_data.get("bayesian_prob", 0.5),
+        "Belirsizlik": bayesian_data.get("uncertainty", 0.3),
+        "Sinyal Notu": bayesian_data.get("signal_grade", "-"),
+        "Bayesian Kelly %": bayesian_data.get("kelly_pct", 0.0),
+        "Anomali": anomaly_data.get("severity", "NORMAL"),
+        "Anomali Skor": anomaly_data.get("anomaly_norm_score", 0.0),
         "Skor": round(general, 1), "Smart Money Skor": round(smart_money, 1),
         "Fizik Skor": physics_data.get("physics_score", 0.0),
         "Gürültü": physics_data.get("noise_level", "ORTA"),

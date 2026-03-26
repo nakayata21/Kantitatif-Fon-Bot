@@ -13,6 +13,7 @@ import yfinance as yf
 import pickle
 import os
 from datetime import datetime
+from typing import List, Dict, Optional
 
 CORRELATION_CACHE_PATH = "correlation_network.pkl"
 _CACHE_TTL_HOURS = 12
@@ -37,7 +38,7 @@ def _save_cache(data):
         pickle.dump(data, f)
 
 
-def build_correlation_matrix(symbols: list[str], lookback_days: int = 60) -> pd.DataFrame:
+def build_correlation_matrix(symbols: List[str], lookback_days: int = 60) -> pd.DataFrame:
     """
     Verilen semboller için günlük getiri korelasyon matrisini hesaplar.
     """
@@ -64,7 +65,7 @@ def build_correlation_matrix(symbols: list[str], lookback_days: int = 60) -> pd.
     return corr
 
 
-def get_dominant_stocks(symbols: list[str], top_n: int = 5) -> list[dict]:
+def get_dominant_stocks(symbols: List[str], top_n: int = 5) -> List[Dict]:
     """
     Portföy/endeks varyansına en fazla katkı sağlayan (lokomotif) hisseleri döner.
     """
@@ -111,7 +112,7 @@ def detect_lead_lag(leader: str, follower: str, max_lag: int = 5) -> dict:
     }
 
 
-def get_leading_signal(symbol: str, dominant_stocks: list[str]) -> float:
+def get_leading_signal(symbol: str, dominant_stocks: List[str]) -> float:
     """
     Lokomotif hisselerin mevcut durumunu göz önüne alarak sembol için
     -1 (negatif öncü sinyali) ile +1 (pozitif öncü sinyali) döner.

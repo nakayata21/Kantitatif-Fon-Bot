@@ -12,7 +12,7 @@ Fizik Tabanlı Makine Öğrenimi — Piyasayı bir enerji sistemi gibi modeller.
 
 import numpy as np
 import pandas as pd
-from typing import Tuple
+from typing import Tuple, List, Dict, Optional, Union
 
 
 # =========================================================================== #
@@ -113,7 +113,7 @@ class FourierNoiseFilter:
         filtered    = np.fft.irfft(fft_filtered, n=n)
         return filtered
 
-    def dominant_cycles(self, prices: np.ndarray, top_k: int = 3) -> list[dict]:
+    def dominant_cycles(self, prices: np.ndarray, top_k: int = 3) -> List[Dict]:
         """
         Fiyat serisindeki dominant döngüleri (cycle) tespit eder.
         Returns: [{"period_days": int, "power": float}, ...]
@@ -352,9 +352,9 @@ class PhysicsFeatureExtractor:
 
         Returns:
           {
-            "physics_score": float (-15 ile +15 arası puan),
-            "noise_level":   str ("DÜŞÜK" / "ORTA" / "YÜKSEK"),
-            "tags":          list[str],
+            "physics_score": float, # (-15 ile +15 arası puan)
+            "noise_level":   str, # ("DÜŞÜK" / "ORTA" / "YÜKSEK")
+            "tags":          List[str],
             "features":      dict (ML eğitimi için ham özellikler)
           }
         """

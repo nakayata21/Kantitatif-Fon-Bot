@@ -11,6 +11,7 @@ import os
 import hashlib
 import time
 from datetime import datetime, timedelta
+from typing import List, Dict, Optional
 
 # --------------------------------------------------------------------------- #
 #  KAP DUYGU ANALİZİ                                                           #
@@ -21,7 +22,7 @@ KAP_CACHE  = {}          # {symbol: {"score": float, "ts": datetime}}
 _KAP_TTL   = 6 * 3600    # 6 saat (saniye)
 
 
-def fetch_kap_disclosures(symbol: str, max_items: int = 5) -> list[str]:
+def fetch_kap_disclosures(symbol: str, max_items: int = 5) -> List[str]:
     """
     KAP'tan sembole ait son bildirimlerin başlıklarını döner.
     Rate-limit aşmamak için 6 saatlik önbellek kullanır.
@@ -38,7 +39,7 @@ def fetch_kap_disclosures(symbol: str, max_items: int = 5) -> list[str]:
         return []
 
 
-def score_kap_with_ai(symbol: str, headlines: list[str]) -> float:
+def score_kap_with_ai(symbol: str, headlines: List[str]) -> float:
     """
     OpenRouter ile başlıkları analiz eder → [-1, +1] duygu skoru döner.
     """
