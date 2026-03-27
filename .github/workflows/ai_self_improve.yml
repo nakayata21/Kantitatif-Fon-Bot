@@ -22,7 +22,9 @@ jobs:
 
       - name: Install dependencies
         run: |
-          pip install pandas numpy scikit-learn yfinance
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
 
       - name: Run Trainer Service (Labeling + Training)
         run: python trainer_service.py
@@ -33,6 +35,9 @@ jobs:
         run: |
           git config --global user.name "AI Self-Trainer"
           git config --global user.email "ai-trainer@github.com"
-          git add signals_log.db ai_model.pkl
+          git add signals_log.db ai_model.pkl model_history.json
+          git fetch origin main
+          git pull --rebase origin main
           git commit -m "Auto-retrain: Updated AI model and signals database [skip ci]" || echo "No changes to commit"
           git push
+

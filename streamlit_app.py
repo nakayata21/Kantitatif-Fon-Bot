@@ -21,6 +21,8 @@ from data_fetcher import (
 )
 from database import init_db, save_scan_results, get_new_elite_entries
 from signals_db import log_signal, init_db as init_signals_db
+from fundamental_db import init_fund_db
+
 
 
 # --- Veri Tespiti (GUI mi yoksa Script mi?) ---
@@ -33,6 +35,8 @@ except:
 # Initialize DBs
 init_db()
 init_signals_db()
+init_fund_db()
+
 
 def init_gui():
     st.set_page_config(page_title="Gelişmiş Hisse Tarayıcı", layout="wide", initial_sidebar_state="expanded")
