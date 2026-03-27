@@ -45,25 +45,30 @@ def get_market_status(market="BIST"):
     return "CLOSED"
 
 def send_msg(text):
-    print(f"DEBUG: Mesaj gonderiliyor... Token uzunlugu: {len(TOKEN) if TOKEN else 0}, Chat ID: {CHAT_ID}")
     if not TOKEN or ":" not in TOKEN:
-        print("❌ HATA: Telegram Token gecersiz veya eksik!")
+        print("❌ HATA: Telegram Bot Token bulunamadı veya geçersiz! Lütfen GitHub Secrets (TELEGRAM_BOT_TOKEN) kısmını kontrol edin.")
         return
     if not CHAT_ID:
-        print("❌ HATA: Telegram Chat ID eksik!")
+        print("❌ HATA: Telegram Chat ID bulunamadı! Lütfen GitHub Secrets (TELEGRAM_CHAT_ID) kısmını kontrol edin.")
         return
     
     url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
-    payload = {"chat_id": CHAT_ID, "text": text, "parse_mode": "Markdown"}
-    print(f"DEBUG: Gonderilen mesajın ilk 100 karakteri: {text[:100]}...")
+    # Parse mode'u Markdown'dan HTML'e çevirerek karakter hatalarını azaltıyoruz
+    payload = {"chat_id": CHAT_ID, "text": text, "parse_mode": "HTML"}
+    
     try:
-        response = requests.post(url, data=payload, timeout=10)
+        response = requests.post(url, data=payload, timeout=15)
         if response.status_code != 200:
-            print(f"❌ Telegram Hatası: {response.status_code} - {response.text}")
+            print(f"❌ Telegram API Hatası: {response.status_code} - {response.text}")
+            # Eğer Markdown/HTML hatası ise düz metin dene
+            print("🔄 Düz metin olarak tekrar deneniyor...")
+            payload["parse_mode"] = ""
+            requests.post(url, data=payload, timeout=10)
         else:
-            print(f"✅ Mesaj başarıyla gönderildi ({CHAT_ID})")
+            print(f"✅ Mesaj başarıyla gönderildi (ChatID: {CHAT_ID})")
     except Exception as e:
         print(f"❌ Telegram Bağlantı Hatası: {str(e)}")
+
 
 from reporting import format_telegram_message, TR_TZ
 

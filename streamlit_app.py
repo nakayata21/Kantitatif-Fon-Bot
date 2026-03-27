@@ -17,9 +17,11 @@ from ui_components import inject_custom_css, signal_style, action_style
 from data_fetcher import (
     fetch_quick_fundamentals, fetch_yf_data, 
     fetch_hist, check_index_health, get_ai_model, interval_obj,
-    fetch_global_indices, fetch_index_history
+    fetch_global_indices, get_cached_index_history
 )
 from database import init_db, save_scan_results, get_new_elite_entries
+from signals_db import log_signal, init_db as init_signals_db
+
 
 # --- Veri Tespiti (GUI mi yoksa Script mi?) ---
 try:
@@ -28,8 +30,9 @@ try:
 except:
     is_gui = False
 
-# Initialize DB
+# Initialize DBs
 init_db()
+init_signals_db()
 
 def init_gui():
     st.set_page_config(page_title="Gelişmiş Hisse Tarayıcı", layout="wide", initial_sidebar_state="expanded")
