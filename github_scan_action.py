@@ -216,5 +216,8 @@ if __name__ == "__main__":
             print(f"[{datetime.now(TR_TZ)}] İşlem Tamamlandı.")
             os._exit(0)
         except Exception as e:
-            print(f"Kritik Hata: {e}")
+            import traceback
+            print(f"❌ KRİTİK SİSTEM HATASI (Traceback):")
+            traceback.print_exc()
             os._exit(1)
+
