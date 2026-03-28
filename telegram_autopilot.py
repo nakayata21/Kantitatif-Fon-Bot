@@ -26,13 +26,20 @@ WORKFLOW_ID = "daily_screener.yml"
 
 def send_msg(chat_id, text, reply_markup=None):
     url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
+    # Önce Markdown ile dene, hata alırsa düz metne dön (alt tire vb. karakterler Markdown'ı bozabiliyor)
     payload = {"chat_id": chat_id, "text": text, "parse_mode": "Markdown"}
     if reply_markup:
         payload["reply_markup"] = json.dumps(reply_markup)
+    
     try:
-        requests.post(url, data=payload, timeout=10)
-    except:
-        pass
+        r = requests.post(url, data=payload, timeout=12)
+        if r.status_code != 200:
+            print(f"⚠️ Telegram Mesaj Hatası ({chat_id}): {r.status_code} - {r.text}")
+            # Düz metin olarak tekrar dene
+            payload["parse_mode"] = ""
+            requests.post(url, data=payload, timeout=10)
+    except Exception as e:
+        print(f"❌ Mesaj Gönderilemedi ({chat_id}): {e}")
 
 def sync_from_cloud(filename):
     """GitHub üzerindeki en güncel dosyayı bulut üzerinden indirir ve yereli günceller."""
