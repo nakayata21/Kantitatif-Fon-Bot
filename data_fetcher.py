@@ -404,7 +404,9 @@ def fetch_hist(tv, symbol: str, exchange: str, interval, bars: int, retries: int
         from tvDatafeed import Interval
         
         yf_sym = f"{symbol}.IS" if exchange == "BIST" else symbol
-        if exchange == "BINANCE": yf_sym = f"{symbol}"
+        if exchange == "BINANCE": 
+            # Binance sym: BTCUSDT -> yf sym: BTC-USD
+            yf_sym = symbol.replace("USDT", "-USD")
         
         yf_int = "1d"
         if interval == Interval.in_weekly: yf_int = "1wk"
@@ -496,12 +498,16 @@ def get_ai_model(market: str, tf_name: str, _tv=None) -> tuple:
                 idx_sym = "QQQ" if market == "NASDAQ" else ("BTCUSDT" if market == "CRYPTO" else "XU100")
                 idx_exch = "NASDAQ" if market == "NASDAQ" else ("BINANCE" if market == "CRYPTO" else "BIST")
                 
-                idx_raw = fetch_hist(_tv, idx_sym, idx_exch, interval_obj(tf["base"]), 10, retries=2)
-                if idx_raw is not None and len(idx_raw) >= 6:
-                    c = idx_raw['close']
-                    ret_5d = ((c.iloc[-1] - c.iloc[-6]) / c.iloc[-6]) * 100
-                    if ret_5d > 1.5: current_regime = 'bull'
-                    elif ret_5d < -1.5: current_regime = 'bear'
+                try:
+                    idx_raw = fetch_hist(_tv, idx_sym, idx_exch, interval_obj(tf["base"]), 10, retries=2)
+                    if idx_raw is not None and len(idx_raw) >= 6:
+                        c = idx_raw['close']
+                        ret_5d = ((c.iloc[-1] - c.iloc[-6]) / c.iloc[-6]) * 100
+                        if ret_5d > 1.5: current_regime = 'bull'
+                        elif ret_5d < -1.5: current_regime = 'bear'
+                except Exception as e:
+                    print(f"   ⚠️ Rejim tespiti veri çekim hatası: {e}")
+                    pass
             except: pass
             
             # Uzmanlar içinden rejime uygun olanı seç
