@@ -166,9 +166,12 @@ class PriceElasticity:
         ma   = prices.rolling(self.window).mean()
         std  = prices.rolling(self.window).std()
 
-        last_price = float(prices.iloc[-1])
-        last_ma    = float(ma.iloc[-1])
-        last_std   = float(std.iloc[-1]) if float(std.iloc[-1]) > 0 else 1.0
+        last_price = float(prices.iloc[-1]) if not isinstance(prices.iloc[-1], pd.Series) else float(prices.iloc[-1].item())
+        last_ma    = float(ma.iloc[-1]) if not isinstance(ma.iloc[-1], pd.Series) else float(ma.iloc[-1].item())
+        
+        _std_val = std.iloc[-1]
+        if isinstance(_std_val, pd.Series): _std_val = _std_val.item()
+        last_std = float(_std_val) if float(_std_val) > 0 else 1.0
 
         # Z-skoru: Kaç standart sapma uzakta?
         z_dist = (last_price - last_ma) / last_std

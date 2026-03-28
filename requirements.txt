@@ -14,5 +14,6 @@ pytz
 xgboost
 optuna
 shap
+pyarrow
 
 

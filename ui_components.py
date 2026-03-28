@@ -76,6 +76,12 @@ def inject_custom_css():
         background-color: #0f111a;
         border-right: 1px solid #1f2335;
     }
+    /* Pulse Animasyonu */
+    @keyframes pulse {
+        0% { opacity: 1; }
+        50% { opacity: 0.7; transform: scale(1.02); }
+        100% { opacity: 1; }
+    }
     </style>
     """, unsafe_allow_html=True)
 
@@ -87,6 +93,8 @@ def signal_style(v: str) -> str:
     return "background-color:#fee2e2;color:#991b1b;font-weight:700;"
 
 def action_style(v: str) -> str:
+    if "🎯" in v or "SNIPER" in v or "ALPHA" in v:
+        return "background-color:#fef9c3;color:#854d0e;border:2px solid #eab308;font-weight:900;animation: pulse 2s infinite;"
     if "AL" in v:
         return "background-color:#dcfce7;color:#166534;font-weight:700;"
     elif "ŞORT" in v or "SAT" in v:

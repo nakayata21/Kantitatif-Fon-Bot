@@ -14,7 +14,8 @@ from data_fetcher import fetch_hist, interval_obj
 from utils import _safe_get
 
 TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "8336526803:AAEvg9b0P9Em5MSND9uCb9RfbTGXBHDGdAA")
-ALLOWED_CHAT_IDS = [os.environ.get("TELEGRAM_CHAT_ID", "1070470722")]
+# Birden fazla chat_id destekle (Hem kendi hesabın hem de kanalın)
+ALLOWED_CHAT_IDS = ["1070470722", "-1003824371023"]
 DATA_FILE = "latest_scan_results.json"
 
 # GitHub Action Tetikleme Ayarları
@@ -32,6 +33,33 @@ def send_msg(chat_id, text, reply_markup=None):
         requests.post(url, data=payload, timeout=10)
     except:
         pass
+
+def sync_from_cloud(filename):
+    """GitHub üzerindeki en güncel dosyayı bulut üzerinden indirir ve yereli günceller."""
+    raw_url = f"https://raw.githubusercontent.com/{REPO_OWNER}/{REPO_NAME}/main/{filename}"
+    try:
+        response = requests.get(raw_url, timeout=10)
+        if response.status_code == 200:
+            with open(filename, "wb") as f:
+                f.write(response.content)
+            # print(f"✅ Bulut Senkronizasyonu Başarılı: {filename}")
+            return True
+    except:
+        pass
+    return False
+
+def send_doc(chat_id, file_path, caption=""):
+    """Telegram üzerinden dosya (CSV/Excel) gönderir. Önce buluttan günceller."""
+    sync_from_cloud(file_path) # Önce GitHub'daki en güncel dosyayı çek
+    if not os.path.exists(file_path): return
+    url = f"https://api.telegram.org/bot{TOKEN}/sendDocument"
+    try:
+        with open(file_path, 'rb') as f:
+            files = {'document': f}
+            data = {'chat_id': chat_id, 'caption': caption, 'parse_mode': 'Markdown'}
+            requests.post(url, data=data, files=files, timeout=20)
+    except Exception as e:
+        print(f"Dosya Gönderim Hatası: {e}")
 
 def set_bot_commands():
     """Telegram sol alt menü butonuna (Bot Commands) komutları ekler."""
@@ -71,6 +99,11 @@ def send_menu(chat_id):
                 {"text": "🔥 BIST Tara", "callback_data": "cmd_tara_bist"}, 
                 {"text": "🔥 NASDAQ Tara", "callback_data": "cmd_tara_nasdaq"},
                 {"text": "🔥 CRYPTO Tara", "callback_data": "cmd_tara_crypto"}
+            ],
+            [
+                {"text": "📂 BIST Tam Liste", "callback_data": "dl_bist"},
+                {"text": "📂 NASDAQ Tam Liste", "callback_data": "dl_nasdaq"},
+                {"text": "📂 CRYPTO Tam Liste", "callback_data": "dl_crypto"}
             ],
             [
                 {"text": "🚀 GitHub Taramasını Başlat", "callback_data": "cmd_github_action"}
@@ -225,34 +258,48 @@ def analyze_single_stock(chat_id, symbol):
         
         msg += f"\n   R/R Oranı: {s['R/R']}\n"
         
-        # AI Yorumu (OpenRouter)
+        # AI Yorumu (OpenRouter - Gelişmiş Quant Analist Modu)
         openrouter_key = os.environ.get("OPENROUTER_API_KEY")
         if openrouter_key:
             try:
                 from openai import OpenAI
                 client = OpenAI(base_url="https://openrouter.ai/api/v1", api_key=openrouter_key)
                 
-                ai_prompt = f"""{symbol} ({market}) hissesinin teknik verileri:
-Fiyat: {close}, Günlük Değişim: {s.get('Günlük %', '-')}, Sinyal: {s['Sinyal']}, Aksiyon: {s['Aksiyon']}
-Skor: {s['Kalite']}/100, Risk Seviyesi: {s['Dusus Riski']}
+                # Tüm teknik ve AI verilerini birleştirerek LLM'e gönderiyoruz
+                phys = s.get('Fizik Skor', 0.0)
+                noise = s.get('Gürültü', 'ORTA')
+                bayesian = s.get('Bayesian Prob', 0.5)
+                
+                ai_prompt = f"""
+SEN BİR QUANT YATIRIM DANIŞMANISIN. Kullanıcıya şu hisseyi analiz et: {symbol} ({market})
+TEKNİK VERİLER:
+- Fiyat: {close}, Günlük Değişim: {s.get('Günlük %', '-')}
+- Sinyal: {s['Sinyal']}, Karar: {s['Decision']}
+- Kalite Skoru: {s['Kalite']}/100, Güven Seviyesi: {s['Guven']}
+- Fizik Motoru Skoru: {phys} (Gürültü: {noise})
+- Bayesian Başarı Olasılığı: %{bayesian*100:.1f}
+- Özel Durumlar: {s.get('Özel Durum', '-')}
 
-Bu verileri teknik terim kullanmadan (RSI, MACD, ADX demeden), sanki borsa ile hiç ilgilenmemiş birine durumu özetler gibi 2-3 kısa cümlede anlat. 
-Hissenin durumu iyi mi kötü mü, şu an almak mantıklı mı yoksa tehlikeli mi net söyle. 
-Mahalle bakkalının anlayacağı kadar sade ve samimi bir dil kullan. Bol emoji ekle."""
+TALİMAT:
+1. Teknik terimleri (RSI, MACD vb.) kullanma. 
+2. Bu verileri birleştirip "Al, Sat veya Bekle" tavsiyeni NEDENLERİYLE birlikte 3-4 cümlede söyle.
+3. Çok samimi, dürüst ve mahalle bakkalının bile anlayacağı bir dil kullan.
+4. "Eğer fiyat {targets.get('Stop Loss', 'bilinmiyor')} altına inerse tehlike var" gibi somut bir uyarı ekle.
+5. Bol emoji kullan."""
 
                 response = client.chat.completions.create(
-                    model="nvidia/nemotron-3-super-120b-a12b:free",
+                    model="google/gemini-2.0-flash-exp:free", # Hızlı ve akıllı model
                     messages=[
                         {"role": "system", "content": "Sen borsa verilerini halkın diliyle anlatan, samimi ve dürüst bir Türk yatırım danışmanısın. Teknik detaylara boğulmadan doğrudan sonuca odaklanırsın."},
                         {"role": "user", "content": ai_prompt}
                     ],
-                    max_tokens=500,
+                    max_tokens=600,
                     temperature=0.7,
                 )
                 ai_text = response.choices[0].message.content.strip()
-                msg += f"\n🧠 *YAPAY ZEKA YORUMU:*\n{ai_text}\n"
+                msg += f"\n🧠 *AI ANALİST YORUMU:*\n{ai_text}\n"
             except Exception as e:
-                print(f"AI Yorum Hatası: {e}")
+                print(f"AI Analiz Hatası: {e}")
         
         send_msg(chat_id, msg)
         
@@ -315,6 +362,12 @@ def perform_scan(market):
     
     df, errs = run_scan(symbols, market, "Gunluk", delay_ms=500, workers=5, gui=False)
     
+    # Tüm sonuçları CSV olarak kaydet
+    full_csv_path = f"full_scan_{market}.csv"
+    if not df.empty:
+        df.to_csv(full_csv_path, index=False, encoding="utf-8-sig")
+        print(f"✅ {market} Tüm Liste Kaydedildi: {full_csv_path}")
+
     msg = format_telegram_message(market, df)
     
     data = {}
@@ -380,6 +433,8 @@ def polling_loop():
                         callback_data = cq.get("data", "")
                         
                         if chat_id not in ALLOWED_CHAT_IDS:
+                            # Opsiyonel: Admin menüsünde görünmesi için yeni bir chat_id tespit edildiğinde log bas
+                            print(f"⚠️  Buton Tıklaması Reddedildi: {chat_id} (Whitelist'te yok)")
                             continue
                             
                         try:
@@ -389,6 +444,7 @@ def polling_loop():
                         
                         if callback_data in ["cmd_bist", "cmd_nasdaq", "cmd_crypto"]:
                             market = callback_data.replace("cmd_", "").upper()
+                            sync_from_cloud(DATA_FILE) # Önce GitHub'dan en güncel JSON'u çek
                             if not os.path.exists(DATA_FILE):
                                 send_msg(chat_id, f"⚠️ *{market}* için henüz kaydedilmiş bir tarama sonucu yok.")
                                 continue
@@ -414,14 +470,24 @@ def polling_loop():
                             
                         elif callback_data == "cmd_github_action":
                             trigger_github_action(chat_id)
+                        
+                        elif callback_data.startswith("dl_"):
+                            market = callback_data.replace("dl_", "").upper()
+                            file_path = f"full_scan_{market}.csv"
+                            if os.path.exists(file_path):
+                                send_doc(chat_id, file_path, f"📊 *{market}* piyasasının son tam tarama sonuçları.")
+                            else:
+                                send_msg(chat_id, f"⚠️ *{market}* için henüz tam liste oluşturulmadı. Lütfen önce tarama başlat.")
 
-                        # Normal mesaj geldiyse
-                        elif "message" in item:
-                            msg = item["message"]
+                        # Normal mesaj veya Kanal paylaşımı geldiyse
+                        elif "message" in item or "channel_post" in item:
+                            msg = item.get("message") or item.get("channel_post")
                             chat_id = str(msg.get("chat", {}).get("id", ""))
                             text = msg.get("text", "").strip().lower()
                             
                             if chat_id not in ALLOWED_CHAT_IDS:
+                                print(f"🔍 Yeni Chat ID Tespit Edildi: {chat_id} | Mesaj: {text}")
+                                # Kanala botu admin yaptıysan, kanala /id yazıp ID'yi buradan görebilirsin.
                                 continue
                             
                             # Komut mu yoksa Hisse mi kontrol et
@@ -451,15 +517,42 @@ def polling_loop():
                                 else:
                                     send_msg(chat_id, "⚠️ Kullanım: /analiz THYAO")
                             else:
-                                # Hisse sembolü mü kontrol et (eski logic)
-                                text_upper = text.upper().replace("/", "").replace("$", "")
+                                # Pazar/Borsa Özeti Sorgusu
+                                if any(x in text_clean for x in ["borsa", "piyasa", "durum", "ozet", "özet"]):
+                                    market_info = ""
+                                    if os.path.exists(DATA_FILE):
+                                        with open(DATA_FILE, "r") as f:
+                                            saved = json.load(f)
+                                        market_info = f"BIST: {saved.get('BIST_time', '-')}\nNASDAQ: {saved.get('NASDAQ_time', '-')}"
+                                    
+                                    send_msg(chat_id, "📈 *Piyasa genel durumu analiz ediliyor...*")
+                                    # Burası için de LLM kullanılabilir ama şimdilik hızlı cevap:
+                                    msg = f"🛰️ *Piyasa Gözlem Raporu*\n\n{market_info}\n\nDetaylı sonuçlar için aşağıdaki menüyü kullanabilirsin."
+                                    send_menu(chat_id)
+                                    continue
+
+                                # Doğal Dil ve Hisse Analizi Tetikleyicileri
+                                text_clean = text.lower().replace("/", "").replace("$", "")
                                 
-                                all_symbols = set(DEFAULT_BIST_HISSELER + DEFAULT_NASDAQ_HISSELER + DEFAULT_CRYPTO_SYMBOLS)
+                                # Cümle içinden hisse kodunu bul (Örn: "THYAO ne olur?" -> "THYAO")
+                                found_symbol = None
+                                for s in all_symbols:
+                                    if s.lower() in text_clean:
+                                        found_symbol = s
+                                        break
                                 
-                                if text_upper in all_symbols or (len(text_upper) >= 2 and len(text_upper) <= 10 and text_upper.isalpha()):
+                                # Eğer hisse bulunduysa ve bir soru/analiz talebi varsa
+                                if found_symbol:
                                     threading.Thread(
                                         target=analyze_single_stock, 
-                                        args=(chat_id, text_upper), 
+                                        args=(chat_id, found_symbol), 
+                                        daemon=True
+                                    ).start()
+                                elif len(text_clean) >= 2 and len(text_clean) <= 6 and text_clean.isalpha():
+                                    # Sadece kısa bir kod yazıldıysa (örn: thy)
+                                    threading.Thread(
+                                        target=analyze_single_stock, 
+                                        args=(chat_id, text_clean.upper()), 
                                         daemon=True
                                     ).start()
                                 else:
@@ -470,7 +563,8 @@ def polling_loop():
 
 
 def perform_saved_check(chat_id, market):
-    """Kayıtlı tarama dosyasından sonucu okuyup gönderir."""
+    """Buluttan senkronize eder ve kayıtlı dosyadan sonucu okur."""
+    sync_from_cloud(DATA_FILE) # Önce GitHub'dan en güncel JSON'u çek
     if not os.path.exists(DATA_FILE):
         send_msg(chat_id, f"⚠️ *{market}* için henüz kaydedilmiş bir tarama sonucu yok.")
         return

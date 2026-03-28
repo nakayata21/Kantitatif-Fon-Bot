@@ -15,6 +15,39 @@ from datetime import datetime
 import optuna
 import glob
 
+# AI Model Seçimi ve Fallback Mantığı
+try:
+    import xgboost
+    # Sadece import testi yapıyoruz, asıl sınıfları ihtiyaca göre HAS_XGB ile kullanacağız
+    HAS_XGB = True
+except (ImportError, OSError):
+    HAS_XGB = False
+
+def get_xgb_clf(**kwargs):
+    if HAS_XGB:
+        try:
+            from xgboost import XGBClassifier
+            return XGBClassifier(**kwargs)
+        except: pass
+    from sklearn.ensemble import RandomForestClassifier
+    # RF için geçersiz XGB parametrelerini sil
+    import inspect
+    rf_args = inspect.signature(RandomForestClassifier.__init__).parameters.keys()
+    rf_params = {k: v for k, v in kwargs.items() if k in rf_args}
+    return RandomForestClassifier(**rf_params)
+
+def get_xgb_reg(**kwargs):
+    if HAS_XGB:
+        try:
+            from xgboost import XGBRegressor
+            return XGBRegressor(**kwargs)
+        except: pass
+    from sklearn.ensemble import RandomForestRegressor
+    import inspect
+    rf_args = inspect.signature(RandomForestRegressor.__init__).parameters.keys()
+    rf_params = {k: v for k, v in kwargs.items() if k in rf_args}
+    return RandomForestRegressor(**rf_params)
+
 MODEL_PATH = "ai_model.pkl"
 HISTORY_PATH = "model_history.json"
 CURRICULUM_PATH = "curriculum_config.json"
@@ -125,12 +158,17 @@ def label_past_signals():
         print(f"⚠️ Fizik Motoru yüklenemedi: {e}")
 
     import sqlite3, json as _json
-    db_conn = sqlite3.connect("signals_log.db")
+    db_conn = sqlite3.connect("signals_log.db", timeout=30)
+    c = db_conn.cursor()
 
     for _, row in df.iterrows():
-        outcome, label_type, max_p, min_p, _ = apply_triple_barrier_optimized(row)
+        outcome, label_type, max_p, min_p, last_close = apply_triple_barrier_optimized(row)
         if outcome is not None:
-            update_label(row['id'], outcome, label_type, max_p, min_p)
+            now = datetime.now().isoformat()
+            c.execute(
+                "UPDATE signals SET outcome=?, is_labeled=1, label_time=?, label_type=?, max_price=?, min_price=? WHERE id=?",
+                (outcome, now, label_type, max_p, min_p, int(row['id']))
+            )
             success += 1
 
             # Fizik özelliklerini features JSON'una ekle
@@ -156,28 +194,54 @@ def label_past_signals():
 # --- AUTO-ML OPTIMIZATION (OPTUNA) ---
 
 def objective(trial, X, y):
-    from xgboost import XGBClassifier
-    param = {
-        'n_estimators': trial.suggest_int('n_estimators', 100, 1000),
-        'max_depth': trial.suggest_int('max_depth', 3, 10),
-        'learning_rate': trial.suggest_float('learning_rate', 0.01, 0.1),
-        'subsample': trial.suggest_float('subsample', 0.5, 1.0),
-        'colsample_bytree': trial.suggest_float('colsample_bytree', 0.5, 1.0),
-        'gamma': trial.suggest_float('gamma', 0, 5),
-        'random_state': 42,
-        'eval_metric': 'logloss',
-        'n_jobs': -1
-    }
+    if HAS_XGB:
+        params = {
+            'n_estimators': trial.suggest_int('n_estimators', 100, 1000),
+            'max_depth': trial.suggest_int('max_depth', 3, 10),
+            'learning_rate': trial.suggest_float('learning_rate', 0.01, 0.1),
+            'subsample': trial.suggest_float('subsample', 0.5, 1.0),
+            'colsample_bytree': trial.suggest_float('colsample_bytree', 0.5, 1.0),
+            'gamma': trial.suggest_float('gamma', 0, 5),
+            'random_state': 42,
+            'eval_metric': 'logloss',
+            'n_jobs': -1
+        }
+    else:
+        params = {
+            'n_estimators': trial.suggest_int('n_estimators', 50, 500),
+            'max_depth': trial.suggest_int('max_depth', 5, 20),
+            'min_samples_split': trial.suggest_int('min_samples_split', 2, 10),
+            'random_state': 42,
+            'n_jobs': -1
+        }
     
     # Zaman Serisi Çapraz Doğrulama
-    tscv = TimeSeriesSplit(n_splits=5)
+    tscv = TimeSeriesSplit(n_splits=3)
     scores = []
     for train_idx, val_idx in tscv.split(X):
         X_train, X_val = X.iloc[train_idx], X.iloc[val_idx]
         y_train, y_val = y.iloc[train_idx], y.iloc[val_idx]
         
-        model = XGBClassifier(**param)
+        model = get_xgb_clf(**params)
         model.fit(X_train, y_train)
+        pred = model.predict_proba(X_val)[:, 1]
+        from sklearn.metrics import log_loss
+        scores.append(log_loss(y_val, pred))
+    
+    return sum(scores) / len(scores)
+
+def train_best_model(X, y, best_params):
+    if HAS_XGB:
+        # Ensure eval_metric is set
+        final_params = best_params.copy()
+        if 'eval_metric' not in final_params: final_params['eval_metric'] = 'logloss'
+        return get_xgb_clf(**final_params).fit(X, y)
+    else:
+        # Filter forbidden XGBoost params for RandomForest
+        import inspect
+        rf_args = inspect.signature(get_xgb_clf.__init__).parameters.keys()
+        final_params = {k: v for k, v in best_params.items() if k in rf_args}
+        return get_xgb_clf(**final_params).fit(X, y)
         preds = model.predict(X_val)
         scores.append(accuracy_score(y_val, preds))
     
@@ -201,7 +265,6 @@ class RegimeAdaptiveEnsemble:
         self.experts = {}
 
     def train_experts(self, data, evolver, study_params):
-        from xgboost import XGBClassifier
         from sklearn.pipeline import Pipeline
         from sklearn.preprocessing import StandardScaler
         
@@ -219,11 +282,13 @@ class RegimeAdaptiveEnsemble:
             
             X, y = regime_data.drop(columns=['target']), regime_data['target']
             
-            # Uzman Modeli Oluştur (Standard XGBoost)
-            # Not: evolver'dan gelen en iyi algoritmayı da kullanabiliriz
+            # Uzman Modeli Oluştur (XGBoost fallback to RandomForest)
+            # filter params to match relevant model
+            model = train_best_model(X, y, study_params)
+            
             expert = Pipeline([
                 ('scaler', StandardScaler()),
-                ('model', XGBClassifier(**study_params, random_state=42, eval_metric='logloss'))
+                ('model', model)
             ])
             
             expert.fit(X, y)
@@ -351,7 +416,6 @@ class KnowledgeDistillation:
         Karmaşık Uzman Modellerin zekasını tek bir hafif 'Öğrenci Model'e aktarır.
         """
         print("\n⚗️ Bilgi Damıtma Süreci Başlatıldı (Distilling Expertise)...")
-        from xgboost import XGBRegressor # Tahmin değerlerini (prob) öğrenmek için Regressor
         
         # 1. Uzmanların Kolektif Tahminlerini Topla (Soft Labels)
         expert_preds = []
@@ -370,7 +434,7 @@ class KnowledgeDistillation:
         
         # 2. Hafif Öğrenciyi Eğit (Öğretmenlerin neye inandığını öğrensin)
         print(f"   👨‍🎓 Öğrenci Model Eğitiliyor (Targets: Master Probabilities)...")
-        student = XGBRegressor(n_estimators=100, max_depth=4, random_state=42)
+        student = get_xgb_reg(n_estimators=100, max_depth=4, random_state=42)
         student.fit(X, soft_labels)
         
         return student
@@ -551,8 +615,8 @@ class EvolvingArchitecture:
 
     def _create_model(self, config):
         if config["algo"] == "xgb":
-            from xgboost import XGBClassifier
-            return XGBClassifier(n_estimators=100, random_state=42, eval_metric='logloss')
+            return get_xgb_clf(n_estimators=100, random_state=42)
+            return get_xgb_clf(n_estimators=100, random_state=42, eval_metric='logloss')
         elif config["algo"] == "rf":
             from sklearn.ensemble import RandomForestClassifier
             return RandomForestClassifier(n_estimators=100, random_state=42)
@@ -755,7 +819,6 @@ class ModelVersionManager:
 def walk_forward_validation(X, y, n_windows=4):
     """Gerçekçi zaman serisi doğrulaması yapar (her pencere önceki veriye eğitilik)."""
     print("\n📊 Walk-Forward Validation başlatılıyor...")
-    from xgboost import XGBClassifier
     window_results = []
     n = len(X)
     window_size = n // (n_windows + 1)
@@ -769,7 +832,7 @@ def walk_forward_validation(X, y, n_windows=4):
         X_train, y_train = X.iloc[:train_end], y.iloc[:train_end]
         X_test, y_test = X.iloc[train_end:test_end], y.iloc[train_end:test_end]
 
-        m = XGBClassifier(n_estimators=100, max_depth=5, random_state=42, eval_metric='logloss', n_jobs=-1)
+        m = get_xgb_clf(n_estimators=100, max_depth=5, random_state=42, n_jobs=-1)
         m.fit(X_train, y_train)
         acc = accuracy_score(y_test, m.predict(X_test))
         try:
@@ -958,6 +1021,18 @@ def retrain_model():
     except Exception:
         pass
 
+    # --- 17. SCANNER POLICY OPTIMIZATION ---
+    try:
+        print("\n🎯 Tarama Stratejisi (Scanner Policy) Optimize Ediliyor...")
+        # Labeled veriyi kullanarak en iyi eşik değerlerini bul
+        best_policy = optimize_scanner_policy(data_enriched)
+        import json
+        with open("scanner_policy.json", "w", encoding="utf-8") as f:
+            json.dump(best_policy, f, indent=4)
+        print("✅ Yeni tarama stratejisi kaydedildi.")
+    except Exception as e:
+        print(f"⚠️ Policy Optimization hatası: {e}")
+
     # --- 18. RAPORLAMA VE OTO-DİAGNOSTİK ---
     top_feats_str = ', '.join(importance_df.head(5)['feature'].tolist()) if not importance_df.empty else 'N/A'
     report = f"""
@@ -982,6 +1057,11 @@ def retrain_model():
 - Overfit Riski: {'🚨 YÜKSEK' if is_overfilled else '✅ DÜŞÜK'}
 - Walk-Forward Pencereleri: {len(wf_windows)} adet test edildi
 
+🎯 **Otonom Tarama Politikası:**
+- Seçilen Alt Limit (Elite): {best_policy.get('elite_threshold', 75)}
+- Seçilen Alt Limit (Trade): {best_policy.get('trade_ready_threshold', 60)}
+- Tahmini İsabet Oranı: %{best_policy.get('win_rate_est', 0)*100:.1f}
+
 📜 **Tecrübe Bankası:** {len(data_enriched)} kayıt hafızaya işlendi.
     """
 
@@ -997,6 +1077,34 @@ def retrain_model():
         send_msg(report[:3000])  # Telegram 4096 char limiti
     except:
         pass
+
+def optimize_scanner_policy(data):
+    """Geçmiş veriye bakarak en kârlı tarama eşiklerini (Elite Threshold) bulur."""
+    import optuna
+    
+    def policy_objective(trial):
+        # Ayarları dene
+        elite_t = trial.suggest_float('elite_threshold', 70.0, 90.0)
+        ready_t = trial.suggest_float('trade_ready_threshold', 50.0, 70.0)
+        
+        # Filtrele ve 'Kâr/Zarar' simülasyonu yap
+        # Basitçe: Elite olanlar arasında başarılı olanların (target=1) oranı
+        elite_signals = data[data['total_score'] >= elite_t] if 'total_score' in data.columns else data
+        if len(elite_signals) < 5: return 0.0 # Yetersiz örnek
+        
+        win_rate = elite_signals['target'].mean()
+        return win_rate # İsabet oranını maksimize et
+        
+    study = optuna.create_study(direction='maximize')
+    study.optimize(policy_objective, n_trials=50)
+    
+    best = study.best_params
+    return {
+        "elite_threshold": round(best['elite_threshold'], 1),
+        "trade_ready_threshold": round(best['trade_ready_threshold'], 1),
+        "updated_at": datetime.now().isoformat(),
+        "win_rate_est": round(study.best_value, 2)
+    }
 
 if __name__ == "__main__":
     init_db()

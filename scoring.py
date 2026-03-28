@@ -1,11 +1,44 @@
 from utils import clamp, _safe_get
 from adaptive_weights import load_adaptive_weights
-from policy_optimizer import TradingPolicyOptimizer
 import numpy as np
 import pandas as pd
 import pickle
 import os
 from typing import Dict, Tuple
+import json
+
+SCAN_POLICY_PATH = "scanner_policy.json"
+
+def get_scanner_policy() -> Dict:
+    """Robotun kendi kendine belirleyeceği optimize tarama stratejisini yükler."""
+    default_policy = {
+        "elite_threshold": 75.0,
+        "trade_ready_threshold": 60.0,
+        "weights": {
+            "trend": 0.25,
+            "dip": 0.15,
+            "breakout": 0.20,
+            "alpha": 0.25,
+            "volatility": 0.15
+        },
+        "indicators": {
+            "rsi_lower": 35,
+            "rsi_upper": 75,
+            "bollinger_band_tightness": 0.05
+        }
+    }
+    
+    if os.path.exists(SCAN_POLICY_PATH):
+        try:
+            with open(SCAN_POLICY_PATH, "r", encoding="utf-8") as f:
+                saved_policy = json.load(f)
+                # Eksik anahtarlar varsa default'u koru
+                for k, v in default_policy.items():
+                    if k not in saved_policy:
+                        saved_policy[k] = v
+                return saved_policy
+        except: pass
+    return default_policy
 
 # --- YENİ AI MODÜLLERİ (Güvenli İmport — hata olursa atlıyoruz) ---
 try:
@@ -709,6 +742,22 @@ def score_symbol(last: pd.Series, prev: pd.Series, conf_last: pd.Series, market:
     is_ut_strong = ut_buy and (close_val > ema20_val) and (rsi_val > 50) and (macd_curr > -0.5)
     has_bullish_div = bool(_safe_get(last, "has_bullish_div", False))
     
+    # --- ELITE SIGNALS: SNIPER & POCKET PIVOT (Phase 13) ---
+    is_sniper = False
+    if has_bullish_div and (vol_spike_val >= 1.5) and (close_val > ema20_val) and (rsi_val > 45):
+        is_sniper = True
+        durumlar.append("🎯 SNIPER SETUP (Uyumsuzluk + Hacim Patlaması)")
+        kalite += 25  # High-confidence alpha signal
+        action = "🎯 KESKİN NİŞANCI (ALPHA AL)"
+        decision = "HIGH CONVICTION"
+
+    is_pocket_pivot = False
+    if (close_val > prev_close) and (vol_spike_val >= 1.8) and (konsol >= 45) and (not is_pump_dump):
+        is_pocket_pivot = True
+        durumlar.append("💰 POCKET PIVOT (Kurumsal Sıkışma Kırılımı)")
+        kalite += 15
+        if action == "✅ ALIM İÇİN UYGUN": action = "💰 KURUMSAL GİRİŞ (PIVOT)"
+
     ut_plus_div = False
     if is_ut_strong and has_bullish_div:
         durumlar.append("🚀 ULTIMATE REVERSAL (UT BOT + UYUMSUZLUK)")
@@ -948,10 +997,15 @@ def score_symbol(last: pd.Series, prev: pd.Series, conf_last: pd.Series, market:
             pass
 
     # Son karar güncellemesi
+    # Dinamik Tarama Politikası (AI tarafından optimize edilmiş)
+    policy = get_scanner_policy()
+    elite_t = policy.get("elite_threshold", 78)
+    ready_t = policy.get("trade_ready_threshold", 35)
+
     kalite = clamp(kalite)
-    if kalite >= 78 and signal != "AÇIĞA SAT":
+    if kalite >= elite_t and signal != "AÇIĞA SAT":
         decision, signal = "HIGH CONVICTION", "AL"
-    elif kalite < 35 and signal == "AL":
+    elif kalite < ready_t and signal == "AL":
         decision, signal = "WATCHLIST", "BEKLE"
 
     return {

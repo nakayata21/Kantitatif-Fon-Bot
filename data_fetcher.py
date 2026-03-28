@@ -1,4 +1,4 @@
-
+import os
 import time
 import random
 import pandas as pd
@@ -15,6 +15,30 @@ from utils import _safe_get
 from indicators import add_indicators
 from scoring import calculate_piotroski
 from fundamental_db import get_fundamental_data, save_fundamental_data
+
+CACHE_DIR = ".cache/ohlcv"
+os.makedirs(CACHE_DIR, exist_ok=True)
+
+def get_cache_path(symbol: str, exchange: str, interval: str) -> str:
+    # Karakterleri temizle
+    clean_sym = symbol.replace("/", "_").replace(".IS", "").replace(":", "_")
+    return os.path.join(CACHE_DIR, f"{clean_sym}_{exchange}_{interval}.parquet")
+
+def save_to_cache(df: pd.DataFrame, symbol: str, exchange: str, interval: str):
+    if df is None or df.empty: return
+    path = get_cache_path(symbol, exchange, interval)
+    try:
+        # Son 1000 barı sakla (yer kazanmak için)
+        df.tail(1000).to_parquet(path)
+    except: pass
+
+def load_from_cache(symbol: str, exchange: str, interval: str) -> pd.DataFrame:
+    path = get_cache_path(symbol, exchange, interval)
+    if os.path.exists(path):
+        try:
+            return pd.read_parquet(path)
+        except: pass
+    return pd.DataFrame()
 
 @st.cache_data(ttl=3600*24, show_spinner=False)
 def fetch_isy_fundamentals(ticker: str) -> Dict[str, object]:
@@ -334,14 +358,41 @@ def interval_obj(key: str):
     return mp[key]
 
 def fetch_hist(tv, symbol: str, exchange: str, interval, bars: int, retries: int = 3):
+    # --- 1. ÖNCE YEREL CACHE'E BAK ---
+    # Interval nesnesi TV enum ise '1d', '4h' vb. string'e çevirelim (key için)
+    int_str = str(interval).split('.')[-1]
+    cached_df = load_from_cache(symbol, exchange, int_str)
+    
+    # Cache'te yeterli ve güncel veri var mı?
+    # Eğer son bar 1 saati aşmıyorsa (kısa vadeli ise) veya bugüne aitse (günlük ise)
+    if not cached_df.empty and len(cached_df) >= bars:
+        last_t = cached_df.index[-1]
+        now = datetime.now()
+        # Çok kaba bir "güncellik" kontrolü (günlük veri için)
+        is_fresh = (now - last_t).total_seconds() < 3600 * 12 # 12 saatten yeniyse
+        if is_fresh:
+            # print(f"   💾 {symbol} Yerel Cache'ten yüklendi.")
+            return cached_df.tail(bars)
+
     last_err: Exception = RuntimeError("bilinmeyen hata")
     for i in range(retries):
         try:
+            # Sadece eksik barları çekmek teoride mümkün ama TV'de tümünü çekmek daha stabil
             d = tv.get_hist(symbol=symbol, exchange=exchange, interval=interval, n_bars=bars)
             if d is not None and not len(d) == 0:
-                return d
+                # Cache ile birleştir
+                if not cached_df.empty:
+                    # Yeni veriyi ekle ve dublikatları sil
+                    new_df = pd.concat([cached_df, d]).drop_duplicates()
+                    new_df = new_df[~new_df.index.duplicated(keep='last')].sort_index()
+                    save_to_cache(new_df, symbol, exchange, int_str)
+                    return new_df.tail(bars)
+                else:
+                    save_to_cache(d, symbol, exchange, int_str)
+                    return d
             last_err = RuntimeError(f"API bos DataFrame dondu (deneme {i+1}/{retries})")
         except Exception as e:
+        # ... (rest of function)
             last_err = RuntimeError(f"{type(e).__name__}: {e} (deneme {i+1}/{retries})")
         
         # Exponential backoff + random jitter for rate limits

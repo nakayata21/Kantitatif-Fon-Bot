@@ -6,7 +6,7 @@ from datetime import datetime, timedelta
 DB_PATH = "signals_log.db"
 
 def init_db():
-    conn = sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect(DB_PATH, timeout=20)
     c = conn.cursor()
     c.execute('''CREATE TABLE IF NOT EXISTS signals (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -35,7 +35,7 @@ def init_db():
 def log_signal(symbol, exchange, price, signal_type, features, market_context=None, signal_time=None):
     """Sinyali, o anki teknik özellikleri ve piyasa bağlamını veritabanına kaydeder."""
     import json
-    conn = sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect(DB_PATH, timeout=20)
     c = conn.cursor()
     # Eğer signal_time verilmediyse güncel zamanı kullan
     if not signal_time:
@@ -56,7 +56,7 @@ def log_signal(symbol, exchange, price, signal_type, features, market_context=No
 
 def get_unlabeled_signals(days_ago=5):
     """Etiketlenmemis ve uzerinden en az 'days_ago' gecmis sinyalleri getirir."""
-    conn = sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect(DB_PATH, timeout=20)
     threshold = (datetime.now() - timedelta(days=days_ago)).isoformat()
     df = pd.read_sql_query(
         "SELECT * FROM signals WHERE is_labeled = 0 AND time_at_signal < ?",
@@ -73,7 +73,7 @@ def update_label(signal_id, outcome, label_type="TIME", max_price=None, min_pric
       'SL'   -> Stop Loss'a degdi            (Basarisiz)
       'TIME' -> Sure doldu, getiriye gore karar verilir
     """
-    conn = sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect(DB_PATH, timeout=20)
     c = conn.cursor()
     now = datetime.now().isoformat()
     c.execute(

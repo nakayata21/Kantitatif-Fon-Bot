@@ -12,7 +12,8 @@ TR_TZ = pytz.timezone("Europe/Istanbul")
 # GitHub Secrets'ten okuyacağız, veya varsayılanları kullanacağız.
 # Güvenlik uyarısı: Hardcoded tokenlar kaldırıldı. GitHub Secrets üzerinden yönetilmelidir.
 TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "8336526803:AAEvg9b0P9Em5MSND9uCb9RfbTGXBHDGdAA")
-CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "1070470722")
+# Birden fazla chat_id desteği (virgülle ayrılabilir)
+CHAT_IDS = [cid.strip() for cid in os.environ.get("TELEGRAM_CHAT_ID", "1070470722, -1003824371023").split(",")]
 MARKET = os.environ.get("TARGET_MARKET", "BIST")
 OPENROUTER_API_KEY = os.environ.get("OPENROUTER_API_KEY", "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")
 
@@ -48,26 +49,28 @@ def send_msg(text):
     if not TOKEN or ":" not in TOKEN:
         print("❌ HATA: Telegram Bot Token bulunamadı veya geçersiz! Lütfen GitHub Secrets (TELEGRAM_BOT_TOKEN) kısmını kontrol edin.")
         return
-    if not CHAT_ID:
-        print("❌ HATA: Telegram Chat ID bulunamadı! Lütfen GitHub Secrets (TELEGRAM_CHAT_ID) kısmını kontrol edin.")
+    if not CHAT_IDS:
+        print("❌ HATA: Telegram Chat ID listesi boş!")
         return
     
     url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
-    # Parse mode'u Markdown'dan HTML'e çevirerek karakter hatalarını azaltıyoruz
-    payload = {"chat_id": CHAT_ID, "text": text, "parse_mode": "HTML"}
     
-    try:
-        response = requests.post(url, data=payload, timeout=15)
-        if response.status_code != 200:
-            print(f"❌ Telegram API Hatası: {response.status_code} - {response.text}")
-            # Eğer Markdown/HTML hatası ise düz metin dene
-            print("🔄 Düz metin olarak tekrar deneniyor...")
-            payload["parse_mode"] = ""
-            requests.post(url, data=payload, timeout=10)
-        else:
-            print(f"✅ Mesaj başarıyla gönderildi (ChatID: {CHAT_ID})")
-    except Exception as e:
-        print(f"❌ Telegram Bağlantı Hatası: {str(e)}")
+    for chat_id in CHAT_IDS:
+        # Parse mode'u Markdown'dan HTML'e çevirerek karakter hatalarını azaltıyoruz
+        payload = {"chat_id": chat_id, "text": text, "parse_mode": "HTML"}
+        
+        try:
+            response = requests.post(url, data=payload, timeout=15)
+            if response.status_code != 200:
+                print(f"❌ Telegram API Hatası ({chat_id}): {response.status_code} - {response.text}")
+                # Eğer Markdown/HTML hatası ise düz metin dene
+                print(f"🔄 {chat_id} için düz metin olarak tekrar deneniyor...")
+                payload["parse_mode"] = ""
+                requests.post(url, data=payload, timeout=10)
+            else:
+                print(f"✅ Mesaj başarıyla gönderildi (ChatID: {chat_id})")
+        except Exception as e:
+            print(f"❌ Telegram Bağlantı Hatası ({chat_id}): {str(e)}")
 
 
 from reporting import format_telegram_message, TR_TZ
