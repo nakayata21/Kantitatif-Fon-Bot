@@ -5,5 +5,12 @@
         "wf_auc": 0.6013491204872001,
         "date": "2026-03-29T11:53:13.729232",
         "strategy": "First Run"
+    },
+    {
+        "accuracy": 0.5801470588235295,
+        "wf_acc": 0.5801470588235295,
+        "wf_auc": 0.570239057710789,
+        "date": "2026-03-29T10:27:23.496720",
+        "strategy": "\ud83d\udea8 ROLLBACK & ENHANCED FILTERING"
     }
 ]
