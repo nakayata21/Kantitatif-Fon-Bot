@@ -9,6 +9,8 @@ import concurrent.futures
 import time
 import os
 from pydantic import BaseModel
+from dotenv import load_dotenv
+load_dotenv()
 
 try:
     from streamlit_app import run_scan
@@ -138,7 +140,9 @@ async def run_scan_api(
                 if not buy_signals.empty:
                     try:
                         msg = format_telegram_message(exchange, df, "OPEN")
-                        send_telegram_message(os.environ.get("TELEGRAM_BOT_TOKEN"), os.environ.get("TELEGRAM_CHAT_ID"), msg)
+                        bot_token = os.environ.get("TELEGRAM_BOT_TOKEN", "8336526803:AAEvg9b0P9Em5MSND9uCb9RfbTGXBHDGdAA")
+                        chat_id = os.environ.get("TELEGRAM_CHAT_ID", "1070470722")
+                        send_telegram_message(bot_token, chat_id, msg)
                     except Exception as e:
                         print(f"Telegram error: {e}")
 

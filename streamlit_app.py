@@ -6,6 +6,8 @@ import concurrent.futures
 from datetime import datetime
 import time
 import os
+from dotenv import load_dotenv
+load_dotenv()
 
 # Local imports
 from constants import DEFAULT_NASDAQ_HISSELER, DEFAULT_BIST_HISSELER, DEFAULT_CRYPTO_SYMBOLS, TIMEFRAME_OPTIONS, BIST_SECTORS

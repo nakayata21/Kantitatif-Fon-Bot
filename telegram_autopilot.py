@@ -3,6 +3,8 @@ import requests
 import json
 from datetime import datetime
 import os
+from dotenv import load_dotenv
+load_dotenv()
 import threading
 
 # Ana modelden gerekli verileri al
