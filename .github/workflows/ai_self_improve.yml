@@ -38,9 +38,9 @@ jobs:
         run: |
           git config --global user.name "AI Self-Trainer"
           git config --global user.email "ai-trainer@github.com"
-          git add signals_log.db ai_model.pkl model_history.json self_improvement_report.md scanner_policy.json curriculum_config.json experience_bank.pkl
           git fetch origin main
-          git pull --rebase origin main
+          git add signals_log.db ai_model.pkl model_history.json self_improvement_report.md scanner_policy.json curriculum_config.json experience_bank.pkl
           git commit -m "Auto-retrain: Updated AI model, reports and signals database [skip ci]" || echo "No changes to commit"
-          git push
+          git pull --rebase origin main
+          git push origin main
 

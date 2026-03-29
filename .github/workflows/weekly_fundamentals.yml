@@ -38,6 +38,8 @@ jobs:
         run: |
           git config --global user.name "Fundamental Updater"
           git config --global user.email "fund-update@github.com"
+          git fetch origin main
           git add fundamental_data.db
           git commit -m "Auto-update: Weekly fundamental data records [skip ci]" || echo "No changes to commit"
-          git push
+          git pull --rebase origin main
+          git push origin main

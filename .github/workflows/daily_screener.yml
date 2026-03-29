@@ -56,10 +56,10 @@ jobs:
         run: |
           git config --global user.name "AI Signals Logger"
           git config --global user.email "logger@github.com"
-          git add signals_log.db
           git fetch origin main
-          git pull --rebase origin main
-          # Retry push to handle concurrent market runners (BIST, NASDAQ, CRYPTO)
+          git add signals_log.db
+          git commit -m "Auto-log: Recorded signals [skip ci]" || echo "No changes to commit"
+          # Birleştirme çakışmalarını önlemek için commit sonrası rebase yapıyoruz
           for i in {1..5}; do
-            git push origin main && break || (git fetch origin main && git pull --rebase origin main && sleep $((RANDOM % 10 + 1)))
+            git pull --rebase origin main && git push origin main && break || (git fetch origin main && git pull --rebase origin main && sleep $((RANDOM % 10 + 1)))
           done
