@@ -57,7 +57,7 @@ def get_market_status(market="BIST"):
 
 def send_msg(text):
     if not TOKEN or ":" not in TOKEN:
-        print("❌ HATA: Telegram Bot Token bulunamadı veya geçersiz! Lütfen GitHub Secrets (TELEGRAM_BOT_TOKEN) kısmını kontrol edin.")
+        print("❌ HATA: Telegram Bot Token bulunamadı veya geçersiz!")
         return
     if not CHAT_IDS:
         print("❌ HATA: Telegram Chat ID listesi boş!")
@@ -66,19 +66,24 @@ def send_msg(text):
     url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
     
     for chat_id in CHAT_IDS:
-        # Parse mode'u Markdown'dan HTML'e çevirerek karakter hatalarını azaltıyoruz
-        payload = {"chat_id": chat_id, "text": text, "parse_mode": "HTML"}
+        # Markdown moduna geri dönüyoruz (reporting.py ile uyumlu olması için)
+        payload = {"chat_id": chat_id, "text": text, "parse_mode": "Markdown"}
         
         try:
-            response = requests.post(url, data=payload, timeout=15)
-            if response.status_code != 200:
-                print(f"❌ Telegram API Hatası ({chat_id}): {response.status_code} - {response.text}")
-                # Eğer Markdown/HTML hatası ise düz metin dene
-                print(f"🔄 {chat_id} için düz metin olarak tekrar deneniyor...")
-                payload["parse_mode"] = ""
-                requests.post(url, data=payload, timeout=10)
+            response = requests.post(url, data=payload, timeout=20)
+            if response.status_code == 200:
+                print(f"✅ Mesaj gönderildi (ChatID: {chat_id})")
+                continue
+            
+            # Eğer Markdown hatası ise düz metin olarak tekrar dene
+            print(f"⚠️ Markdown Hatası ({chat_id}): {response.status_code}. Düz metin deneniyor...")
+            payload["parse_mode"] = ""
+            retry_res = requests.post(url, data=payload, timeout=15)
+            if retry_res.status_code == 200:
+                print(f"✅ Mesaj düz metin olarak gönderildi (ChatID: {chat_id})")
             else:
-                print(f"✅ Mesaj başarıyla gönderildi (ChatID: {chat_id})")
+                print(f"❌ Telegram API Kritik Hata ({chat_id}): {retry_res.status_code} - {retry_res.text}")
+                
         except Exception as e:
             print(f"❌ Telegram Bağlantı Hatası ({chat_id}): {str(e)}")
 
