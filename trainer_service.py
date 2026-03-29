@@ -236,9 +236,8 @@ def objective(trial, X, y, best_config):
         
         model = evolver._create_model(best_config)
         
-        # Safe param set
-        import inspect
-        valid_params = inspect.signature(model.__init__).parameters.keys()
+        # YENİ GÜVENLİ VERSİYON:
+        valid_params = model.get_params().keys() # Modelin kabul ettiği ayarları al
         filtered_params = {k: v for k, v in params.items() if k in valid_params}
         model.set_params(**filtered_params)
         
@@ -256,10 +255,8 @@ def train_best_model(X, y, best_params, best_config=None):
     else:
         model = get_xgb_clf()
         
-    import inspect
-    # Handle both direct models and potential Pipeline/wrapper classes (though usually it's the model here)
-    target = model
-    valid_params = inspect.signature(target.__init__).parameters.keys()
+    # YENİ GÜVENLİ VERSİYON:
+    valid_params = model.get_params().keys() # Modelin kabul ettiği ayarları al
     final_params = {k: v for k, v in best_params.items() if k in valid_params}
     
     model.set_params(**final_params)
@@ -267,47 +264,7 @@ def train_best_model(X, y, best_params, best_config=None):
     
 # --- REGIME ADAPTIVE ENSEMBLE (Piyasa Uzmanları Kurulu) ---
 
-class RegimeAdaptiveEnsemble:
-    def __init__(self):
-        self.regimes = {
-            'bull': 'index_return_5d > 1.5',
-            'bear': 'index_return_5d < -1.5',
-            'sideways': 'abs(index_return_5d) <= 1.5'
-        }
-        self.experts = {}
 
-    def train_experts(self, data, evolver, best_config, study_params):
-        from sklearn.pipeline import Pipeline
-        from sklearn.preprocessing import StandardScaler
-        
-        print("\n🎓 Uzman Modeller (Regime Experts) Eğitiliyor...")
-        
-        for regime_name, condition in self.regimes.items():
-            # Veriyi rejime göre filtrele
-            try:
-                regime_data = data.query(condition)
-            except: regime_data = data # Fallback
-            
-            if len(regime_data) < 20:
-                print(f"   ⚠️ {regime_name.upper()} için yetersiz veri, genel model kullanılacak.")
-                regime_data = data
-            
-            X, y = regime_data.drop(columns=['target']), regime_data['target']
-            
-            # Uzman Modeli Oluştur (XGBoost fallback to RandomForest)
-            # filter params to match relevant model
-            model = train_best_model(X, y, study_params, best_config=best_config)
-            
-            expert = Pipeline([
-                ('scaler', StandardScaler()),
-                ('model', model)
-            ])
-            
-            expert.fit(X, y)
-            self.experts[regime_name] = expert
-            print(f"   ✅ {regime_name.upper()} uzmanı hazır. ({len(regime_data)} Örnek)")
-        
-        return self.experts
 
 # --- EXPERIENCE MEMORY BANK (Hafıza ve Geçmiş Deneyim Bankası) ---
 
@@ -547,8 +504,8 @@ class RegimeAdaptiveEnsemble:
             # Uzman Modeli Oluştur (Filtrelenmiş Parametrelerle)
             model_obj = evolver._create_model(best_config)
             
-            import inspect
-            valid_params = inspect.signature(model_obj.__init__).parameters.keys()
+            # YENİ GÜVENLİ VERSİYON:
+            valid_params = model_obj.get_params().keys() # Modelin kabul ettiği ayarları al
             filtered_params = {k: v for k, v in study_params.items() if k in valid_params}
             model_obj.set_params(**filtered_params)
             
