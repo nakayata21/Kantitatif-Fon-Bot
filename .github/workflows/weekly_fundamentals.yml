@@ -25,9 +25,8 @@ jobs:
 
       - name: Install dependencies
         run: |
-          pip install pandas numpy requests yfinance isyatirimhisse ta
-          pip install git+https://github.com/rongardF/tvdatafeed.git
-          pip install xgboost scikit-learn
+          pip install --upgrade pip
+          pip install -r requirements.txt
 
       - name: Run Fundamental Update
         run: python update_fundamentals_service.py

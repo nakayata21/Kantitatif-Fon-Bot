@@ -1,4 +1,5 @@
 import os
+import time
 import pandas as pd
 from streamlit_app import run_scan
 from constants import DEFAULT_BIST_HISSELER, DEFAULT_NASDAQ_HISSELER

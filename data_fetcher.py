@@ -4,10 +4,28 @@ import random
 import pandas as pd
 import numpy as np
 import requests
-import streamlit as st
 import yfinance as yf
 from typing import Dict, List, Optional, Tuple
 from datetime import datetime
+
+# --- Streamlit Optional Check ---
+try:
+    import streamlit as st
+except ImportError:
+    # Dummy decorators to replace st.cache when streamlit is missing
+    class st:
+        @staticmethod
+        def cache_data(ttl=None, show_spinner=False):
+            def decorator(func):
+                return func
+            return decorator
+        
+        @staticmethod
+        def cache_resource(ttl=None, show_spinner="Loading..."):
+            def decorator(func):
+                return func
+            return decorator
+# --------------------------------
 
 # Local imports
 from constants import USER_AGENTS, TIMEFRAME_OPTIONS
@@ -398,7 +416,10 @@ def fetch_hist(tv, symbol: str, exchange: str, interval, bars: int, retries: int
             return cached_df.tail(bars)
 
     last_err: Exception = RuntimeError("bilinmeyen hata")
-    for i in range(retries):
+    # GitHub Action (veya hız gerektiren işler) için deneme sayısını 2'ye düşürüyoruz (hızlı fallback için)
+    effective_retries = 2
+    
+    for i in range(effective_retries):
         try:
             # Sadece eksik barları çekmek teoride mümkün ama TV'de tümünü çekmek daha stabil
             d = tv.get_hist(symbol=symbol, exchange=exchange, interval=interval, n_bars=bars)
@@ -413,13 +434,21 @@ def fetch_hist(tv, symbol: str, exchange: str, interval, bars: int, retries: int
                 else:
                     save_to_cache(d, symbol, exchange, int_str)
                     return d
-            last_err = RuntimeError(f"API bos DataFrame dondu (deneme {i+1}/{retries})")
+            
+            err_msg = "API bos DataFrame dondu"
+            last_err = RuntimeError(f"{err_msg} (deneme {i+1}/{effective_retries})")
         except Exception as e:
-        # ... (rest of function)
-            last_err = RuntimeError(f"{type(e).__name__}: {e} (deneme {i+1}/{retries})")
+            raw_err = str(e).lower()
+            last_err = RuntimeError(f"{type(e).__name__}: {e} (deneme {i+1}/{effective_retries})")
+            
+            # Eğer hata 'timeout' veya 'connection' ile ilgiliyse bir kez daha denemek yerine direkt fallback'e geçebiliriz
+            # (Çünkü GitHub IP'si muhtemelen kalıcı olarak bloklanmıştır veya TradingView o an cevap vermiyordur)
+            if "timeout" in raw_err or "connection" in raw_err or "no data" in raw_err:
+                break
         
         # Exponential backoff + random jitter for rate limits
-        time.sleep((1.5 * (2 ** i)) + random.uniform(0.5, 1.5))
+        if i < effective_retries - 1:
+            time.sleep((1.5 * (2 ** i)) + random.uniform(0.5, 1.5))
         
     # YFINANCE FALLBACK
     try:

@@ -423,6 +423,8 @@ def score_symbol(last: pd.Series, prev: pd.Series, conf_last: pd.Series, market:
     is_volume_up = (vol_spike_val >= 1.3)
 
     dip = 0.0
+    dip_signals = []
+    
     dip += 25 if is_rsi_oversold else 0
     dip += 15 if is_rsi_rising else 0
     dip += 20 if macd_cross_up else 0
@@ -447,7 +449,6 @@ def score_symbol(last: pd.Series, prev: pd.Series, conf_last: pd.Series, market:
 
     if bb_pct > 0.85: dip -= 40 # Aşırı ısınmışsa dip puanı kır
     
-    dip_signals = []
     if is_rsi_oversold: dip_signals.append("✓ RSI Aşırı Satım")
     if is_rsi_rising: dip_signals.append("✓ RSI Dönüşü")
     if macd_cross_up: dip_signals.append("✓ MACD Kesti")

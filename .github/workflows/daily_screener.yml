@@ -20,7 +20,7 @@ jobs:
       fail-fast: false
       matrix:
         market: [BIST, NASDAQ, CRYPTO]
-    timeout-minutes: 15
+    timeout-minutes: 45
     concurrency:
       group: ${{ github.workflow }}-${{ matrix.market }}-${{ github.ref }}
       cancel-in-progress: true
