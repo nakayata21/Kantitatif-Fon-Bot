@@ -1,6 +1,6 @@
 
 🔬 **AI KENDİNİ İYİLEŞTİRME RAPORU**
-📅 2026-03-29 10:37
+📅 2026-03-29 10:48
 
 ✅ **Model Performansı:**
 - Kazanan Mimari: RandomForest (Robust)
@@ -21,8 +21,8 @@
 - Walk-Forward Pencereleri: 4 adet test edildi
 
 🎯 **Otonom Tarama Politikası:**
-- Seçilen Alt Limit (Elite): 70.3
-- Seçilen Alt Limit (Trade): 52.3
+- Seçilen Alt Limit (Elite): 78.1
+- Seçilen Alt Limit (Trade): 63.1
 - Tahmini İsabet Oranı: %35.0
 
 📜 **Tecrübe Bankası:** 1702 kayıt hafızaya işlendi.
