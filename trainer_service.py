@@ -192,8 +192,10 @@ def label_past_signals():
 
 # --- AUTO-ML OPTIMIZATION (OPTUNA) ---
 
-def objective(trial, X, y):
-    if HAS_XGB:
+def objective(trial, X, y, best_config):
+    algo = best_config.get("algo", "xgb")
+    
+    if algo == "xgb" and HAS_XGB:
         params = {
             'n_estimators': trial.suggest_int('n_estimators', 100, 1000),
             'max_depth': trial.suggest_int('max_depth', 3, 10),
@@ -205,23 +207,41 @@ def objective(trial, X, y):
             'eval_metric': 'logloss',
             'n_jobs': -1
         }
-    else:
+    elif algo == "rf":
         params = {
-            'n_estimators': trial.suggest_int('n_estimators', 50, 500),
+            'n_estimators': trial.suggest_int('n_estimators', 50, 1000),
             'max_depth': trial.suggest_int('max_depth', 5, 20),
             'min_samples_split': trial.suggest_int('min_samples_split', 2, 10),
             'random_state': 42,
             'n_jobs': -1
         }
+    else: # Gradient Boosting (gb) or Fallback
+        params = {
+            'n_estimators': trial.suggest_int('n_estimators', 50, 500),
+            'max_depth': trial.suggest_int('max_depth', 3, 12),
+            'learning_rate': trial.suggest_float('learning_rate', 0.01, 0.2),
+            'random_state': 42
+        }
     
     # Zaman Serisi Çapraz Doğrulama
     tscv = TimeSeriesSplit(n_splits=3)
     scores = []
+    
+    # create_model logic here
+    evolver = EvolvingArchitecture()
+    
     for train_idx, val_idx in tscv.split(X):
         X_train, X_val = X.iloc[train_idx], X.iloc[val_idx]
         y_train, y_val = y.iloc[train_idx], y.iloc[val_idx]
         
-        model = get_xgb_clf(**params)
+        model = evolver._create_model(best_config)
+        
+        # Safe param set
+        import inspect
+        valid_params = inspect.signature(model.__init__).parameters.keys()
+        filtered_params = {k: v for k, v in params.items() if k in valid_params}
+        model.set_params(**filtered_params)
+        
         model.fit(X_train, y_train)
         pred = model.predict_proba(X_val)[:, 1]
         from sklearn.metrics import log_loss
@@ -229,18 +249,21 @@ def objective(trial, X, y):
     
     return sum(scores) / len(scores)
 
-def train_best_model(X, y, best_params):
-    if HAS_XGB:
-        # Ensure eval_metric is set
-        final_params = best_params.copy()
-        if 'eval_metric' not in final_params: final_params['eval_metric'] = 'logloss'
-        return get_xgb_clf(**final_params).fit(X, y)
+def train_best_model(X, y, best_params, best_config=None):
+    if best_config:
+        evolver = EvolvingArchitecture()
+        model = evolver._create_model(best_config)
     else:
-        # Filter forbidden XGBoost params for RandomForest
-        import inspect
-        rf_args = inspect.signature(get_xgb_clf.__init__).parameters.keys()
-        final_params = {k: v for k, v in best_params.items() if k in rf_args}
-        return get_xgb_clf(**final_params).fit(X, y)
+        model = get_xgb_clf()
+        
+    import inspect
+    # Handle both direct models and potential Pipeline/wrapper classes (though usually it's the model here)
+    target = model
+    valid_params = inspect.signature(target.__init__).parameters.keys()
+    final_params = {k: v for k, v in best_params.items() if k in valid_params}
+    
+    model.set_params(**final_params)
+    return model.fit(X, y)
     
 # --- REGIME ADAPTIVE ENSEMBLE (Piyasa Uzmanları Kurulu) ---
 
@@ -253,7 +276,7 @@ class RegimeAdaptiveEnsemble:
         }
         self.experts = {}
 
-    def train_experts(self, data, evolver, study_params):
+    def train_experts(self, data, evolver, best_config, study_params):
         from sklearn.pipeline import Pipeline
         from sklearn.preprocessing import StandardScaler
         
@@ -273,7 +296,7 @@ class RegimeAdaptiveEnsemble:
             
             # Uzman Modeli Oluştur (XGBoost fallback to RandomForest)
             # filter params to match relevant model
-            model = train_best_model(X, y, study_params)
+            model = train_best_model(X, y, study_params, best_config=best_config)
             
             expert = Pipeline([
                 ('scaler', StandardScaler()),
@@ -521,9 +544,13 @@ class RegimeAdaptiveEnsemble:
             
             X_r, y_r = regime_data.drop(columns=['target']), regime_data['target']
             
-            # Uzman Modeli Oluştur
+            # Uzman Modeli Oluştur (Filtrelenmiş Parametrelerle)
             model_obj = evolver._create_model(best_config)
-            model_obj.set_params(**study_params)
+            
+            import inspect
+            valid_params = inspect.signature(model_obj.__init__).parameters.keys()
+            filtered_params = {k: v for k, v in study_params.items() if k in valid_params}
+            model_obj.set_params(**filtered_params)
             
             expert = Pipeline([
                 ('scaler', StandardScaler()),
@@ -886,10 +913,14 @@ def retrain_model():
     print(f"   📊 Walk-Forward Sonuç: Acc=%{wf_acc*100:.1f} | AUC={wf_auc:.3f}")
     
     # --- 4. OPTUNA HYPERPARAMOPTİMİZASYON ---
-    study = optuna.create_study(direction='maximize')
+    study = optuna.create_study(direction='minimize') # log_loss minimize edilmeli
     optuna.logging.set_verbosity(optuna.logging.WARNING)
-    study.optimize(lambda t: objective(t, X, y), n_trials=20)
-    current_acc = study.best_value
+    study.optimize(lambda t: objective(t, X, y, best_config), n_trials=20)
+    current_loss = study.best_value
+    current_acc = 1.0 - current_loss # Yaklaşık acc (log_loss'tan türetilmiş)
+    # Gerçek doğruluk skorunu al (en iyi params ile)
+    best_params = study.best_params
+    current_acc = wf_acc # Gerçek başarı kriterimiz Walk-Forward başarısıdır
 
     # --- 5. SEVİYE VE STRATEJİ ANALİZİ ---
     new_stage = curriculum.auto_adjust_difficulty(current_acc)
