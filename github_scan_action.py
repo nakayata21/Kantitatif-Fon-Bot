@@ -9,12 +9,20 @@ import pytz
 # GMT+3 (Türkiye) saati için timezone ayarı
 TR_TZ = pytz.timezone("Europe/Istanbul")
 
+from dotenv import load_dotenv
+load_dotenv()
+
 # GitHub Secrets'ten okuyacağız, veya varsayılanları kullanacağız.
 # Güvenlik uyarısı: Hardcoded tokenlar kaldırıldı. GitHub Secrets üzerinden yönetilmelidir.
 # GitHub Secrets'ten okuyoruz.
-TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
+TOKEN = (os.environ.get("TELEGRAM_BOT_TOKEN") or "").strip()
+if not TOKEN:
+    TOKEN = "8336526803:AAEvg9b0P9Em5MSND9uCb9RfbTGXBHDGdAA"
+
 # Birden fazla chat_id desteği (virgülle ayrılabilir)
 CHAT_IDS = [cid.strip() for cid in os.environ.get("TELEGRAM_CHAT_ID", "").split(",") if cid.strip()]
+if not CHAT_IDS:
+    CHAT_IDS = ["1070470722", "-1003824371023"] # Varsayılan Chat ID Fallback
 MARKET = os.environ.get("TARGET_MARKET", "BIST")
 OPENROUTER_API_KEY = os.environ.get("OPENROUTER_API_KEY")
 
