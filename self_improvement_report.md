@@ -1,12 +1,12 @@
 
 🔬 **AI KENDİNİ İYİLEŞTİRME RAPORU**
-📅 2026-03-29 10:27
+📅 2026-03-29 10:37
 
 ✅ **Model Performansı:**
 - Kazanan Mimari: RandomForest (Robust)
 - Doğruluk (Optuna CV): %58.0
 - Walk-Forward Acc: %58.0 | AUC: 0.570
-- Strateji: 🚨 ROLLBACK & ENHANCED FILTERING
+- Strateji: Steady
 - 🔄 ROLLBACK: Eski versiyona dönüldü!
 
 🧠 **Zeka ve Şeffaflık:**
@@ -21,8 +21,8 @@
 - Walk-Forward Pencereleri: 4 adet test edildi
 
 🎯 **Otonom Tarama Politikası:**
-- Seçilen Alt Limit (Elite): 72.4
-- Seçilen Alt Limit (Trade): 69.2
+- Seçilen Alt Limit (Elite): 70.3
+- Seçilen Alt Limit (Trade): 52.3
 - Tahmini İsabet Oranı: %35.0
 
 📜 **Tecrübe Bankası:** 1702 kayıt hafızaya işlendi.
