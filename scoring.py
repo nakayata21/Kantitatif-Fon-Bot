@@ -89,6 +89,12 @@ try:
 except Exception:
     _BAYESIAN_OK = False
 
+try:
+    from takas_analyzer import TakasAnalizoru
+    _TAKAS_OK = True
+except Exception:
+    _TAKAS_OK = False
+
 # --- EXPERIENCE REPLAY (Hafıza ve Tecrübe Sorgulama) ---
 
 def query_experience_memory(current_row, feature_list):
@@ -252,6 +258,15 @@ def calculate_elite_score(technical: Dict, fundamental: Dict) -> Dict[str, objec
     if tech_smart_money >= 50 and pe is not None and pe < 25:
         elite_bonus += 5
         elite_reasons.append("💰 Kurumsal+Ucuz")
+    
+    # Takas Bonusu
+    takas_puan = float(technical.get("Takas Puani", 0))
+    if takas_puan >= 75:
+        elite_bonus += 12
+        elite_reasons.append("🏢 GÜÇLÜ TAKAS TOPLAMA")
+    elif takas_puan >= 55:
+        elite_bonus += 5
+        elite_reasons.append("🏦 Takas Pozitif")
         
     # Bilanço Patlaması (Earnings Surprise) & Borç Azaltımı
     debt_growth = fundamental.get("debt_growth")
@@ -309,7 +324,8 @@ def calculate_elite_score(technical: Dict, fundamental: Dict) -> Dict[str, objec
         "pb_ratio": pb,
         "isy_score": fund_score,
         "isy_grade": fund_grade,
-        "piotroski_score": f_score
+        "piotroski_score": f_score,
+        "takas_puan": takas_puan
     }
 
 def score_symbol(last: pd.Series, prev: pd.Series, conf_last: pd.Series, market: str = "NASDAQ", index_healthy: bool = True) -> Dict[str, object]:
@@ -414,6 +430,21 @@ def score_symbol(last: pd.Series, prev: pd.Series, conf_last: pd.Series, market:
     dip += 15 if is_price_above_ma20 else 0
     dip += 25 if is_near_bottom else 0
     dip += 5 if is_volume_up else 0
+    
+    # --- Wyckoff & VSA Accumulation Bonus ---
+    if bool(_safe_get(last, "is_spring", False)):
+        dip += 35
+        dip_signals.append("⚡ Wyckoff Spring (Ayı Tuzağı)")
+    if bool(_safe_get(last, "stopping_volume", False)):
+        dip += 25
+        dip_signals.append("🛡️ Durduran Hacim (VSA)")
+    if bool(_safe_get(last, "no_supply_test", False)):
+        dip += 20
+        dip_signals.append("🧪 Arzsızlık Testi (No Supply)")
+    if bool(_safe_get(last, "rs_vs_market", False)):
+        dip += 15
+        dip_signals.append("👑 Endeksten Güçlü Dönüş")
+
     if bb_pct > 0.85: dip -= 40 # Aşırı ısınmışsa dip puanı kır
     
     dip_signals = []
@@ -541,6 +572,33 @@ def score_symbol(last: pd.Series, prev: pd.Series, conf_last: pd.Series, market:
     elif konsol >= 25: konsol_tag = "⚪ Zayıf"
     else: konsol_tag = "-"
 
+    # 8. TAKAS VE AKD ANALİZİ (BIST için)
+    takas_scr = 0.0
+    takas_karar = "-"
+    takas_detay = []
+    
+    if market == "BIST" and _TAKAS_OK:
+        # data_fetcher veya signals_db'den kaydedilmiş takas verisi çekilecek
+        # Şimdilik placeholders (İleride veri gelince güncellenecek)
+        from fundamental_db import get_fundamental_data
+        tk_data = get_fundamental_data(last.get("Hisse", ""))
+        
+        # Simülasyon verisi (Sadece UI'da yer açmak için, ilerde API gelince veri tabanından asıl veri gelecek)
+        # Örnek: Eğer hacim spike ve trend beraberse takasın da iyi olma ihtimali yüksektir. 
+        # (Bu sadece geçici bir proxy'dir, asıl veriler aracı kurumdan gelince TakasAnalizoru sınıfa asıl veri geçilecek)
+        if tk_data and tk_data.get("takas_metrics"):
+             try:
+                 ana = TakasAnalizoru(json.loads(tk_data["takas_metrics"]))
+                 res = ana.analiz_et()
+                 takas_scr = res["takas_puani"]
+                 takas_karar = res["takas_karari"]
+                 takas_detay = res["sinyaller"]
+             except: pass
+        else:
+             # Veri yoksa nötr ama modülün çalıştığını belli et (Simülasyon proxy: Momentum+Volume trendi)
+             takas_scr = clamp(momentum * 0.4 + vol_spike_val * 10) if market == "BIST" else 0
+             takas_karar = "Gözlem Altında" if takas_scr > 50 else "-"
+
     # 9. STAN WEINSTEIN STAGE ANALYSIS
     w_score, w_msg, w_stage_tag = score_weinstein(last, conf_last)
 
@@ -581,16 +639,17 @@ def score_symbol(last: pd.Series, prev: pd.Series, conf_last: pd.Series, market:
             w_momentum = dw["w_momentum"] * 1.00
             w_sm       = dw["w_sm"]       * 1.00
             w_wein     = dw["w_wein"]     * 0.60
-
+    
     # 1'e normalize et
-    _total = w_trend + w_dip + w_breakout + w_momentum + w_sm + w_wein
+    _total = w_trend + w_dip + w_breakout + w_momentum + w_sm + w_wein + (0.1 if market=="BIST" else 0)
     if _total > 0:
         w_trend /= _total; w_dip /= _total; w_breakout /= _total
         w_momentum /= _total; w_sm /= _total; w_wein /= _total
+        w_takas = (0.1 / _total if market=="BIST" else 0)
 
     general = clamp(
         (trend * w_trend) + (dip * w_dip) + (breakout * w_breakout) + 
-        (momentum * w_momentum) + (smart_money * w_sm) + (w_score * w_wein)
+        (momentum * w_momentum) + (smart_money * w_sm) + (w_score * w_wein) + (takas_scr * w_takas if market=="BIST" else 0)
     )
 
     # Mark Minervini Trend Template Kontrolü
@@ -716,6 +775,8 @@ def score_symbol(last: pd.Series, prev: pd.Series, conf_last: pd.Series, market:
     if is_long_term_reversal: durumlar.append(f"🔄 DÜŞÜŞ BİTTİ (%{round(drop_pct,1)} Düşüşten Dönüş)")
     if is_cap: durumlar.append("😱 PANİK SATIŞI (CAPITULATION) SONRASI DÖNÜŞ")
     if is_solid_bottom: durumlar.append("🚨 DİPTEN DÖNÜYOR")
+    if bool(_safe_get(last, "is_spring", False)): durumlar.append("⚡ WYCKOFF SPRING")
+    if bool(_safe_get(last, "stopping_volume", False)): durumlar.append("💎 DURDURAN HACİM GİRİŞİ")
     if overextend_reasons: durumlar.extend(overextend_reasons)
     if inst_bar: durumlar.append("💰 KURUMSAL GİRİŞ")
     if bb_squeeze: durumlar.append("🗜️ SIKIŞMA VAR")
@@ -1041,6 +1102,15 @@ def score_symbol(last: pd.Series, prev: pd.Series, conf_last: pd.Series, market:
         "Trend Sablonu": "✅ GÜÇLÜ (MINERVINI)" if is_minervini else "-",
         "UT_Bot_Al": is_ut_strong,
         "UT_Plus_Div": ut_plus_div,
+        "Takas Puani": takas_scr,
+        "Takas Karari": takas_karar,
+        "Takas Detayları": " | ".join(takas_detay) if takas_detay else "-",
+        "Vade": vade,
+        "Kalite": round(kalite, 1),
+        "Hacim Spike": round(vol_spike_val, 2),
+        "Bollinger Genisligi": round(float(_safe_get(last, "bb_width", 0.0)), 4),
+        "Daralma (Squeeze)": "🗜 İzlenir" if bb_squeeze else "-",
+        "Elite Skor": 0  # run_scan'de temel analiz ile güncellenir
     }
 
 def score_weinstein(last: pd.Series, conf_last: pd.Series) -> Tuple[float, str, str]:

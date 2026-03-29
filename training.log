@@ -1,0 +1,115 @@
+/Users/selmanaslan/Library/Python/3.9/lib/python/site-packages/urllib3/__init__.py:35: NotOpenSSLWarning: urllib3 v2 only supports OpenSSL 1.1.1+, currently the 'ssl' module is compiled with 'LibreSSL 2.8.3'. See: https://github.com/urllib3/urllib3/issues/3020
+  warnings.warn(
+[I 2026-03-29 11:52:49,158] A new study created in memory with name: no-name-e5fe3ea5-e4ae-4f50-8e19-de3341e492bd
+/Users/selmanaslan/Library/Python/3.9/lib/python/site-packages/sklearn/calibration.py:333: UserWarning: The `cv='prefit'` option is deprecated in 1.6 and will be removed in 1.8. You can use CalibratedClassifierCV(FrozenEstimator(estimator)) instead.
+  warnings.warn(
+/Users/selmanaslan/Library/Python/3.9/lib/python/site-packages/sklearn/calibration.py:333: UserWarning: The `cv='prefit'` option is deprecated in 1.6 and will be removed in 1.8. You can use CalibratedClassifierCV(FrozenEstimator(estimator)) instead.
+  warnings.warn(
+/Users/selmanaslan/Library/Python/3.9/lib/python/site-packages/sklearn/calibration.py:333: UserWarning: The `cv='prefit'` option is deprecated in 1.6 and will be removed in 1.8. You can use CalibratedClassifierCV(FrozenEstimator(estimator)) instead.
+  warnings.warn(
+you are using nologin method, data you access may be limited
+2026-03-29 11:53:14.151 WARNING streamlit.runtime.caching.cache_data_api: No runtime found, using MemoryCacheStorageManager
+2026-03-29 11:53:14.154 WARNING streamlit.runtime.caching.cache_data_api: No runtime found, using MemoryCacheStorageManager
+2026-03-29 11:53:14.154 WARNING streamlit.runtime.caching.cache_data_api: No runtime found, using MemoryCacheStorageManager
+2026-03-29 11:53:14.156 WARNING streamlit.runtime.caching.cache_data_api: No runtime found, using MemoryCacheStorageManager
+2026-03-29 11:53:14.158 WARNING streamlit.runtime.caching.cache_data_api: No runtime found, using MemoryCacheStorageManager
+2026-03-29 11:53:14.159 WARNING streamlit.runtime.scriptrunner_utils.script_run_context: Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+
+🔍 1703 adet sinyal için 20 sembolün geçmiş verisi indiriliyor...
+YF.download() has changed argument auto_adjust default to True
+✅ Veriler hazır. Triple Barrier + Fizik Özellik Çıkarımı başlatılıyor...
+⚛️ Fizik Motoru aktif: Kalman+Fourier+Elastisite+Momentum özellikleri ML verisine ekleniyor.
+✅ 1703 sinyal etiketlendi (Fizik özellikleri eklendi).
+
+🌍 Makro Özellikler: Eğitim verisine ekleniyor...
+   ℹ️ Makro veri bulunamadı, backfill'den gelecek verilerde eklenecek.
+
+🧬 Evrimsel Mimari Testi Başlatıldı (Mutation Testing)...
+   🔸 XGBoost (Standard): %62.4
+   🔸 XGBoost (Light): %62.4
+   🔸 RandomForest (Robust): %62.4
+   🔸 GradientBoosting (Deep): %60.5
+🏆 Kazanan Dominant Gen: XGBoost (Standard) (Skor: %62.4)
+
+🧠 Causal Analiz Başlatıldı: Sahte korelasyonlar eleniyor...
+   🚫 Elenen Gürültü Özellikleri: ['vol_spike', 'phys_momentum_acceleration', 'phys_dominant_cycle_days', 'phys_momentum_velocity_ratio', 'hour_of_day', 'phys_fourier_residual_pct', 'adx', 'macd_hist', 'is_month_start', 'is_month_end', 'phys_elastic_force', 'day_of_week', 'phys_momentum_break']
+
+📊 Walk-Forward Validation başlatılıyor...
+   Pencere 1: Acc=%51.2 | AUC=0.727 | Test=340 örnek
+   Pencere 2: Acc=%55.0 | AUC=0.573 | Test=340 örnek
+   Pencere 3: Acc=%55.6 | AUC=0.534 | Test=340 örnek
+   Pencere 4: Acc=%75.6 | AUC=0.571 | Test=340 örnek
+   📈 Walk-Forward Ortalama: Acc=%59.3 | AUC=0.601
+   📊 Walk-Forward Sonuç: Acc=%59.3 | AUC=0.601
+
+🧪 Sentetik Piyasa Senaryoları Üretiliyor (+300 Örnek)...
+
+🛡️ Robustness Guard: Güvenlik denetimleri yapılıyor...
+
+🏗️ Feature Factory: Yeni özellikler keşfediliyor...
+   ✨ Keşfedilen Süper Özellikler: ['feat_rsi_mom', 'feat_vol_atr', 'feat_trend_strength']
+
+⚖️ Governor System: Uzun vadeli denetim başlatıldı (Auditing)...
+   🛑 FEATURE CREEP: Çok fazla değişken (28) birikti. Budama yapılması önerilir.
+   🚨 BLACK-BOX RİSKİ: Model derinliği çok yüksek, basitleştirme zorunlu.
+   ✅ Denetim Tamamlandı. Sistem stabil.
+
+🎓 Uzman Modeller (Regime Experts) Eğitiliyor...
+   ✅ BULL uzmanı hazır. (1702 Örnek)
+   ✅ BEAR uzmanı hazır. (1702 Örnek)
+   ✅ SIDEWAYS uzmanı hazır. (1702 Örnek)
+
+🎯 Confidence Calibration: Model tahminleri kalibre ediliyor...
+
+🎯 Confidence Calibration: Model tahminleri kalibre ediliyor...
+
+🎯 Confidence Calibration: Model tahminleri kalibre ediliyor...
+✅ Tüm uzman modeller kalibre edildi.
+
+🔍 SHAP Explainer hazırlanıyor...
+   ⚠️ SHAP setup hatası: Model type not yet supported by TreeExplainer: <class 'sklearn.calibration.CalibratedClassifierCV'>
+
+⚗️ Bilgi Damıtma Süreci Başlatıldı (Distilling Expertise)...
+   👨‍🎓 Öğrenci Model Eğitiliyor (Targets: Master Probabilities)...
+
+📜 Deneyim Bankası Güncelleniyor (1702 Yeni Tecrübe)...
+   ✅ Geçmiş deneyimler 'Experience Bank' içine işlendi.
+   ⚠️ Feature importance alınamadı: 'CalibratedClassifierCV' object has no attribute 'feature_importances_'
+   💾 Model versiyonu kaydedildi: model_archive/model_v20260329_1153_acc67.pkl
+🔄 [AdaptiveWeights] Ağırlık önbelleği sıfırlandı.
+
+🎯 Tarama Stratejisi (Scanner Policy) Optimize Ediliyor...
+✅ Yeni tarama stratejisi kaydedildi.
+
+==================================================
+
+🔬 **AI KENDİNİ İYİLEŞTİRME RAPORU**
+📅 2026-03-29 11:53
+
+✅ **Model Performansı:**
+- Kazanan Mimari: XGBoost (Standard)
+- Doğruluk (Optuna CV): %67.7
+- Walk-Forward Acc: %59.3 | AUC: 0.601
+- Strateji: First Run
+- 💾 Yeni versiyon kaydedildi.
+
+🧠 **Zeka ve Şeffaflık:**
+- SHAP Açıklanabilirlik: Aktif ✅
+- Confidence Calibration: Aktif ✅
+- Keşfedilen Süper Özellikler: feat_rsi_mom, feat_vol_atr, feat_trend_strength
+- En Kritik 5 Özellik: N/A
+
+🛡️ **Güvenlik:**
+- Causal Süzgeç: 28 / 25 özellik onaylandı
+- Overfit Riski: ✅ DÜŞÜK
+- Walk-Forward Pencereleri: 4 adet test edildi
+
+🎯 **Otonom Tarama Politikası:**
+- Seçilen Alt Limit (Elite): 79.3
+- Seçilen Alt Limit (Trade): 53.2
+- Tahmini İsabet Oranı: %35.0
+
+📜 **Tecrübe Bankası:** 1702 kayıt hafızaya işlendi.
+    
+==================================================
+❌ HATA: Telegram Bot Token bulunamadı veya geçersiz! Lütfen GitHub Secrets (TELEGRAM_BOT_TOKEN) kısmını kontrol edin.

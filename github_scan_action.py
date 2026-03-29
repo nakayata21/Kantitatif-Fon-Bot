@@ -11,11 +11,12 @@ TR_TZ = pytz.timezone("Europe/Istanbul")
 
 # GitHub Secrets'ten okuyacağız, veya varsayılanları kullanacağız.
 # Güvenlik uyarısı: Hardcoded tokenlar kaldırıldı. GitHub Secrets üzerinden yönetilmelidir.
-TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "8336526803:AAEvg9b0P9Em5MSND9uCb9RfbTGXBHDGdAA")
+# GitHub Secrets'ten okuyoruz.
+TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
 # Birden fazla chat_id desteği (virgülle ayrılabilir)
-CHAT_IDS = [cid.strip() for cid in os.environ.get("TELEGRAM_CHAT_ID", "1070470722, -1003824371023").split(",")]
+CHAT_IDS = [cid.strip() for cid in os.environ.get("TELEGRAM_CHAT_ID", "").split(",") if cid.strip()]
 MARKET = os.environ.get("TARGET_MARKET", "BIST")
-OPENROUTER_API_KEY = os.environ.get("OPENROUTER_API_KEY", "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")
+OPENROUTER_API_KEY = os.environ.get("OPENROUTER_API_KEY")
 
 def get_market_status(market="BIST"):
     """Piyasa durumunu kontrol eder: OPEN, PRE_MARKET, CLOSED"""

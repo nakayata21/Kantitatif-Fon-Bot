@@ -17,7 +17,7 @@ from ui_components import inject_custom_css, signal_style, action_style
 from data_fetcher import (
     fetch_quick_fundamentals, fetch_yf_data, 
     fetch_hist, check_index_health, get_ai_model, interval_obj,
-    fetch_global_indices, get_cached_index_history
+    fetch_global_indices, get_cached_index_history, to_float
 )
 from database import init_db, save_scan_results, get_new_elite_entries
 from signals_db import log_signal, init_db as init_signals_db
@@ -124,65 +124,63 @@ def init_gui():
             signal_filter = st.selectbox("Sinyal Filtresi", ["Tümü", "Sadece AL", "Sadece ŞORT"], index=0)
 
         if st.button("Taramayi Baslat", type="primary"):
-            df_res, err_res = run_scan(symbols, st.session_state.piyasa, tf_name, delay_ms, workers=workers)
-            st.session_state.scan_df = df_res
-            st.session_state.scan_errs = err_res
-            st.session_state.scan_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            with st.spinner(f"{st.session_state.piyasa} verileri analiz ediliyor..."):
+                df_res, err_res = run_scan(symbols, st.session_state.piyasa, tf_name, delay_ms, workers=workers)
+                st.session_state.scan_df = df_res
+                st.session_state.scan_errs = err_res
+                st.session_state.scan_time = datetime.now().strftime("%H:%M:%S")
 
-            # DB'ye Kaydet
-            save_scan_results(df_res, st.session_state.piyasa, tf_name)
+                # DB'ye Kaydet
+                save_scan_results(df_res, st.session_state.piyasa, tf_name)
 
-            if st.session_state.get("tg_token_input") and st.session_state.get("tg_chat_id_input") and not df_res.empty:
-                from reporting import format_telegram_message
-                msg = format_telegram_message(st.session_state.piyasa, df_res, "OPEN")
-                
-                # Opsiyonel: AI yorumu ekle (OpenRouter anahtarı varsa)
-                if st.session_state.get("or_key_input"):
-                    try:
-                        from github_scan_action import get_ai_commentary
-                        # or_key_input'u global os.environ'a geçici olarak set edelim ki get_ai_commentary kullansın
-                        os.environ["OPENROUTER_API_KEY"] = st.session_state.get("or_key_input")
-                        ai_msg = get_ai_commentary(st.session_state.piyasa, df_res)
-                        if ai_msg:
-                            msg += f"\n\n\U0001f9e0 *YAPAY ZEKA YORUMU:*\n{ai_msg}"
-                    except Exception as e:
-                        print(f"Streamlit AI Comment Error: {e}")
-                
-                send_telegram_message(telegram_token, telegram_chat_id, msg)
-                st.success("✅ Tarama sonuçları Telegram'a gönderildi!")
-
-            if not df_res.empty:
-                df_to_show = df_res.copy()
-                if signal_filter == "Sadece AL":
-                    df_to_show = df_to_show[df_to_show["Sinyal"] == "AL"].copy()
-                elif signal_filter == "Sadece ŞORT":
-                    df_to_show = df_to_show[df_to_show["Sinyal"] == "AÇIĞA SAT"].copy()
+                if st.session_state.get("tg_token_input") and st.session_state.get("tg_chat_id_input") and not df_res.empty:
+                    from reporting import format_telegram_message
+                    msg = format_telegram_message(st.session_state.piyasa, df_res, "OPEN")
                     
-                if not df_to_show.empty:
-                    render_ui_results(df_to_show, tf_name)
-                    render_ai_assistant(df_to_show, st.session_state.get("or_key_input", ""))
-        
-        # Tarama yapilmis ama su an aktif buton tiklanmamis durumlar icin (session state)
-        if not st.session_state.scan_df.empty:
-             df_cached = st.session_state.scan_df.copy()
-             
-             if signal_filter == "Sadece AL":
-                 df_cached = df_cached[df_cached["Sinyal"] == "AL"].copy()
-             elif signal_filter == "Sadece ŞORT":
-                 df_cached = df_cached[df_cached["Sinyal"] == "AÇIĞA SAT"].copy()
-             
-             if not df_cached.empty:
-                 # tf_name selectbox'tan geldigi icin locals() icinde olmali
-                 cur_tf = tf_name if 'tf_name' in locals() else "Günlük"
-                 render_ui_results(df_cached, cur_tf)
-                 render_ai_assistant(df_cached, st.session_state.get("or_key_input", ""))
-        elif "scan_df" in st.session_state and st.session_state.scan_df.empty:
-             st.info("Tarama başladığında sonuçlar burada görünecek.")
+                    if st.session_state.get("or_key_input"):
+                        try:
+                            from github_scan_action import get_ai_commentary
+                            os.environ["OPENROUTER_API_KEY"] = st.session_state.get("or_key_input")
+                            ai_msg = get_ai_commentary(st.session_state.piyasa, df_res)
+                            if ai_msg:
+                                msg += f"\n\n🤖 *AI ANALİZİ:*\n{ai_msg}"
+                        except Exception as e:
+                            print(f"AI Error: {e}")
+                    
+                    send_telegram_message(st.session_state.tg_token_input, st.session_state.tg_chat_id_input, msg)
+                    st.success("✅ Telegram bildirimi gönderildi!")
+
+        # --- SONUÇLARI GÖSTER ---
+        # Tarama yapılmışsa (veya cache'ten geliyorsa) sonuçları ve hataları göster
+        if not st.session_state.scan_df.empty or st.session_state.scan_errs:
+            st.markdown(f"**Son Tarama:** {st.session_state.get('scan_time', '-')} | **Hisse Sayısı:** {len(st.session_state.scan_df)} | **Hata:** {len(st.session_state.scan_errs)}")
+            
+            df_to_show = st.session_state.scan_df.copy()
+            if signal_filter == "Sadece AL":
+                df_to_show = df_to_show[df_to_show["Sinyal"] == "AL"].copy()
+            elif signal_filter == "Sadece ŞORT":
+                df_to_show = df_to_show[df_to_show["Sinyal"] == "AÇIĞA SAT"].copy()
+                
+            cur_tf = tf_name if 'tf_name' in locals() else "Gunluk"
+            
+            # Her durumda UI'ı render et, hatalar sekmesini içerecek
+            render_ui_results(df_to_show, cur_tf, st.session_state.scan_errs)
+            
+            if not df_to_show.empty:
+                render_ai_assistant(df_to_show, st.session_state.get("or_key_input", ""))
+        else:
+             st.info("Henüz tarama yapılmadı. 'Taramayı Başlat' butonuna tıklayarak en güncel verileri analiz edebilirsiniz.")
 
     with main_tab2:
         render_backtest_tab()
 
-def render_ui_results(df, tf_name):
+def render_ui_results(df, tf_name, errs=None):
+    if df is None or df.empty:
+        st.warning("Gösterilecek veri bulunamadı. Lütfen tarama yapın.")
+        if errs:
+            for e in errs: st.error(e)
+        return
+
     m1, m2, m3, m4 = st.columns(4)
     m1.metric("Toplam", len(df))
     m2.metric("AL Sinyali", int((df["Sinyal"] == "AL").sum()))
@@ -191,22 +189,28 @@ def render_ui_results(df, tf_name):
 
     st.markdown("---")
 
-    tab_uzun, tab_orta, tab_kisa, tab_elite, tab_fundamental, tab_weinstein, tab_minervini, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
+    tabs = st.tabs([
         "📅 Uzun Vade", "📅 Orta Vade", "📅 Kısa Vade", "💎 ELİT HİSSELER", 
         "📊 Temel Analiz", "📈 Stan Weinstein", "🚀 Mark Minervini",
         "📉 Dip", "🚀 Breakout", "📈 Momentum", "💥 Hacim Patlaması", 
-        "🗜️ Bollinger Sıkışması", "📐 Konsolidasyon"
+        "🗜️ Bollinger Sıkışması", "📐 Konsolidasyon", "❌ Hatalar & Loglar"
     ])
+    
+    (tab_uzun, tab_orta, tab_kisa, tab_elite, tab_fundamental, tab_weinstein, tab_minervini, 
+     tab2, tab3, tab4, tab5, tab6, tab7, tab_errs) = tabs
 
     with tab_uzun:
-        uzun_df = df[df["Vade"] == "Uzun"]
-        render_scan_table(uzun_df, sort_col="Kalite")
+        if "Vade" in df.columns:
+            uzun_df = df[df["Vade"] == "Uzun"]
+            render_scan_table(uzun_df, sort_col="Kalite")
     with tab_orta:
-        orta_df = df[df["Vade"] == "Orta"]
-        render_scan_table(orta_df, sort_col="Kalite")
+        if "Vade" in df.columns:
+            orta_df = df[df["Vade"] == "Orta"]
+            render_scan_table(orta_df, sort_col="Kalite")
     with tab_kisa:
-        kisa_df = df[df["Vade"] == "Kısa"]
-        render_scan_table(kisa_df, sort_col="Kalite")
+        if "Vade" in df.columns:
+            kisa_df = df[df["Vade"] == "Kısa"]
+            render_scan_table(kisa_df, sort_col="Kalite")
     with tab_elite:
         if "Elite Skor" in df.columns:
             elite_df = df.sort_values(by="Elite Skor", ascending=False)
@@ -239,6 +243,32 @@ def render_ui_results(df, tf_name):
     with tab5: render_scan_table(df[df["Hacim Spike"] >= 2.0], sort_col="Hacim Spike")
     with tab6: render_scan_table(df[df["Daralma (Squeeze)"] == "🗜 İzlenir"], sort_col="Bollinger Genisligi")
     with tab7: render_scan_table(df, sort_col="Konsol Skor")
+    
+    with tab_errs:
+        st.subheader("⚠️ Tarama Sırasında Oluşan Hatalar")
+        if errs:
+            for e in errs:
+                st.error(e)
+        else:
+            st.success("Tüm semboller başarıyla tarandı.")
+
+    # --- YENİ: TAKAS MONİTÖRÜ SEKME ÖZELLEŞTİRMESİ ---
+    st.markdown("---")
+    res_col1, res_col2 = st.columns(2)
+    with res_col1:
+        st.subheader("🏢 Takas & AKD Detaylı İzleyici")
+        st.caption("En iyi 10 'AL' sinyalinin kurumsal takas verilerini buradan kontrol edebilirsiniz.")
+        al_hisseler = df[df["Sinyal"] == "AL"].head(10)
+        if not al_hisseler.empty:
+            for _, row in al_hisseler.iterrows():
+                with st.expander(f"📌 {row['Hisse']} Takas Verisi"):
+                    st.write(f"Takas Kararı: **{row.get('Takas Karari', '-')}**")
+                    st.write(f"Takas Puanı: **{row.get('Takas Puani', 0)}**")
+                    st.write("Sinyaller:")
+                    for sig in str(row.get('takas_detay', '-')).split('|'):
+                        st.info(sig.strip())
+        else:
+            st.info("Henüz güçlü takas onayı alan AL sinyali yok.")
 
     # Korelasyon ve Sektör Analizi (Alt Bölüm)
     render_correlation_analysis(df, st.session_state.piyasa, tf_name)
@@ -372,6 +402,8 @@ def render_scan_table(input_df, sort_col="Kalite"):
         "isy_score": st.column_config.ProgressColumn("💎 Temel Puan", min_value=0, max_value=100),
         "isy_grade": st.column_config.TextColumn("📜 Temel Not"),
         "piotroski_score": st.column_config.ProgressColumn("📊 F-Score", min_value=0, max_value=9),
+        "Takas Puani": st.column_config.ProgressColumn("🏢 Takas Puanı", min_value=0, max_value=100),
+        "Takas Karari": st.column_config.TextColumn("🔍 Takas Kararı"),
         "has_bullish_div": st.column_config.CheckboxColumn("🐂 Boğa Uyumsuzluğu"),
         "div_msg": st.column_config.TextColumn("Uyumsuzluk Notu"),
     }
@@ -503,15 +535,21 @@ def run_scan(symbols, exchange, tf_name, delay_ms, workers=1):
                 feat = [float(_safe_get(last, c, 0.0)) for c in ai_features]
                 ai_prob = ai_model.predict_proba([feat])[0][1] * 100
             
-            res = {"Hisse": sym, "AI Tahmin": f"%{round(ai_prob,1)}", **s,
-                   "Hacim Spike": round(float(_safe_get(last, "vol_spike", 0.0)), 2),
-                   "Bollinger Genisligi": round(float(_safe_get(last, "bb_width", 0.0)), 2),
-                   "Daralma (Squeeze)": "🗜 İzlenir" if bool(_safe_get(last, "bb_squeeze", False)) else "-",
-                   "has_bullish_div": has_bullish_div,
-                   "div_msg": div_msg,
-                   "Sinyal Fiyatı": sig_price if sig_price else "-",
-                   "Sinyal Mesafesi": f"%{round(dist_pct, 1)}" if sig_price else "-",
-                   "Sinyal Zamanı": f"{sig_bars} bar önce" if sig_price else "-"}
+            res = {
+                "Hisse": sym, 
+                "AI Tahmin": f"%{round(ai_prob,1)}", 
+                **s,
+                "Hacim Spike": round(float(_safe_get(last, "vol_spike", 0.0)), 2),
+                "Bollinger Genisligi": round(float(_safe_get(last, "bb_width", 0.0)), 2),
+                "Daralma (Squeeze)": "🗜 İzlenir" if bool(_safe_get(last, "bb_squeeze", False)) else "-",
+                "has_bullish_div": has_bullish_div,
+                "div_msg": div_msg,
+                "Takas Puani": s.get("Takas Puani", 0),
+                "Takas Karari": s.get("Takas Karari", "-"),
+                "Sinyal Fiyatı": sig_price if sig_price else "-",
+                "Sinyal Mesafesi": f"%{round(dist_pct, 1)}" if sig_price else "-",
+                "Sinyal Zamanı": f"{sig_bars} bar önce" if sig_price else "-"
+            }
             if targets: res.update(targets)
             
             # --- AI ÖĞRENME LOGLAMASI (Zenginleştirilmiş) ---

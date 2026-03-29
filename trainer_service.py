@@ -18,9 +18,8 @@ import glob
 # AI Model Seçimi ve Fallback Mantığı
 try:
     import xgboost
-    # Sadece import testi yapıyoruz, asıl sınıfları ihtiyaca göre HAS_XGB ile kullanacağız
     HAS_XGB = True
-except (ImportError, OSError):
+except Exception:
     HAS_XGB = False
 
 def get_xgb_clf(**kwargs):
@@ -242,17 +241,7 @@ def train_best_model(X, y, best_params):
         rf_args = inspect.signature(get_xgb_clf.__init__).parameters.keys()
         final_params = {k: v for k, v in best_params.items() if k in rf_args}
         return get_xgb_clf(**final_params).fit(X, y)
-        preds = model.predict(X_val)
-        scores.append(accuracy_score(y_val, preds))
     
-    return np.mean(scores)
-
-def retrain_model():
-    data = get_training_data()
-    if data.empty or len(data) < 50:
-        print(f"⚠️ Yetersiz veri ({len(data)}). Optimizasyon için 50 örnek bekleniyor.")
-        return
-
 # --- REGIME ADAPTIVE ENSEMBLE (Piyasa Uzmanları Kurulu) ---
 
 class RegimeAdaptiveEnsemble:

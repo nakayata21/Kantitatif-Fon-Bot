@@ -297,7 +297,28 @@ def add_indicators(df: pd.DataFrame, index_df: pd.DataFrame = None) -> pd.DataFr
     out['feat_vol_atr'] = out['vol_spike'] / (out['atr_pct'].replace(0, np.nan) + 0.1)
     # Trend Gücü (ADX ve EMA eğimi kombinasyonu)
     out['feat_trend_strength'] = out['adx'] * out['ema20_slope'].fillna(0)
+
+    # --- ADVANCED ACCUMULATION (Wyckoff & VSA) ---
+    # 1. Wyckoff Spring Detection (Düşüş sonrası ayı tuzağı)
+    # Son 20 barın en düşüğünün altına sarkıp (fitil), kapanışı üzerinde yapma
+    support_20 = out["low"].shift(1).rolling(20).min()
+    out["is_spring"] = (out["low"] < support_20) & (out["close"] > support_20) & (out["in_bear_market"])
     
+    # 2. VSA: Stopping Volume (Düşüşü durduran devasa hacim)
+    # Fiyat düşerken (veya dipte) ortalamanın 2.5 katı hacim ve dar spread (kapanış yüksekte)
+    out["stopping_volume"] = (out["vol_spike"] > 2.5) & (out["close"] > out["low"] + (out["high"] - out["low"]) * 0.5) & (out["drop_from_52w_high"] > 20)
+    
+    # 3. VSA: No Supply Test (Arzsızlık testi)
+    # Fiyatın hafifçe yeni bir düşük yapması ama hacmin çok düşük (vol_spike < 0.7) olması
+    out["no_supply_test"] = (out["low"] <= out["low"].shift(1)) & (out["vol_spike"] < 0.7) & (out["rsi"] < 45)
+    
+    # 4. Relative Strength vs Index (Dipten kopuş teyidi)
+    if index_df is not None and not index_df.empty:
+        # Endeks düşerken veya yatayken hissenin yükselmesi
+        idx_ret = index_df["close"].pct_change(3)
+        sym_ret = out["close"].pct_change(3)
+        out["rs_vs_market"] = (sym_ret > idx_ret) & (idx_ret < 0)
+
     return out
 
 def calculate_price_targets(base_df: pd.DataFrame) -> Optional[dict]:

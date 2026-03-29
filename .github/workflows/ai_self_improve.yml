@@ -5,6 +5,9 @@ on:
     - cron: '0 0 * * 0' # Her Pazar gece yarısı (UTC)
   workflow_dispatch:      # Manuel tetikleme için
 
+permissions:
+  contents: write
+
 jobs:
   retrain:
     runs-on: ubuntu-latest
@@ -35,9 +38,9 @@ jobs:
         run: |
           git config --global user.name "AI Self-Trainer"
           git config --global user.email "ai-trainer@github.com"
-          git add signals_log.db ai_model.pkl model_history.json
+          git add signals_log.db ai_model.pkl model_history.json self_improvement_report.md scanner_policy.json curriculum_config.json experience_bank.pkl
           git fetch origin main
           git pull --rebase origin main
-          git commit -m "Auto-retrain: Updated AI model and signals database [skip ci]" || echo "No changes to commit"
+          git commit -m "Auto-retrain: Updated AI model, reports and signals database [skip ci]" || echo "No changes to commit"
           git push
 

@@ -6,6 +6,9 @@ on:
     - cron: '*/15 6-20 * * 1-5'
   workflow_dispatch: # Manuel tetikleme için
 
+permissions:
+  contents: write
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -47,3 +50,16 @@ jobs:
           timeout_minutes: 12
           max_attempts: 2
           command: python github_scan_action.py
+
+      - name: Sinyalleri Kaydet ve Pushla (Kendi Kendine Öğrenme İçin)
+        if: always()
+        run: |
+          git config --global user.name "AI Signals Logger"
+          git config --global user.email "logger@github.com"
+          git add signals_log.db
+          git fetch origin main
+          git pull --rebase origin main
+          # Retry push to handle concurrent market runners (BIST, NASDAQ, CRYPTO)
+          for i in {1..5}; do
+            git push origin main && break || (git fetch origin main && git pull --rebase origin main && sleep $((RANDOM % 10 + 1)))
+          done

@@ -367,7 +367,7 @@ def perform_scan(market):
     elif market == "NASDAQ": symbols = DEFAULT_NASDAQ_HISSELER
     else: symbols = DEFAULT_CRYPTO_SYMBOLS
     
-    df, errs = run_scan(symbols, market, "Gunluk", delay_ms=500, workers=5, gui=False)
+    df, errs = run_scan(symbols, market, "Gunluk", delay_ms=500, workers=5)
     
     # Tüm sonuçları CSV olarak kaydet
     full_csv_path = f"full_scan_{market}.csv"

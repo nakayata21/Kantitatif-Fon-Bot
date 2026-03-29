@@ -19,8 +19,15 @@ def init_fund_db():
                     fundamental_grade TEXT,
                     earnings_growth REAL,
                     debt_growth REAL,
+                    takas_metrics TEXT,
                     last_updated TEXT
                 )''')
+    # Kolon ekleme (Migration)
+    cols = ["takas_metrics"]
+    for col in cols:
+        try:
+            c.execute(f"ALTER TABLE fundamental_metrics ADD COLUMN {col} TEXT")
+        except: pass
     conn.commit()
     conn.close()
 
@@ -30,15 +37,19 @@ def save_fundamental_data(symbol, market, data):
     c = conn.cursor()
     now = datetime.now().isoformat()
     
+    import json
+    tk_json = json.dumps(data.get("takas_metrics", {})) if data.get("takas_metrics") else None
+
     c.execute('''INSERT OR REPLACE INTO fundamental_metrics 
                  (symbol, market, pe_ratio, pb_ratio, piotroski_score, fundamental_score, 
-                  fundamental_grade, earnings_growth, debt_growth, last_updated)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+                  fundamental_grade, earnings_growth, debt_growth, takas_metrics, last_updated)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
               (symbol, market, 
                data.get("pe_ratio"), data.get("pb_ratio"), 
-               data.get("piotroski_score"), data.get("fundamental_score", 0),
-               data.get("fundamental_grade", "-"), 
+               data.get("piotroski_score"), data.get("isy_score", data.get("fundamental_score", 0)),
+               data.get("isy_grade", data.get("fundamental_grade", "-")), 
                data.get("earnings_growth"), data.get("debt_growth"),
+               tk_json,
                now))
     conn.commit()
     conn.close()

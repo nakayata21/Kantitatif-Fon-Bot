@@ -91,6 +91,11 @@ def format_telegram_message(market, df_res, status):
             if fund_parts:
                 msg += f"🏢 *Temel:* {' | '.join(fund_parts)}\n"
             
+            # Takas Bilgisi
+            takas_karar = row.get("Takas Karari", "-")
+            if takas_karar not in ("-", "VERİ BEKLENİYOR"):
+                msg += f"📦 *Takas:* {takas_karar} (Puan: {row.get('Takas Puani', 0)})\n"
+            
             msg += "\n"
             
     # Güçlü UT Bot Sinyalleri (Sadece Tek Başına Olanlar)
@@ -114,5 +119,19 @@ def format_telegram_message(market, df_res, status):
             for _, row in div_stocks.iterrows():
                 msg += f"👉 *{row['Hisse']}* | Puan: {row['Kalite']}/100\n"
             msg += "\n"
+    
+    # Wyckoff & VSA Akümülasyon (YENİ)
+    acc_signals = []
+    if "is_spring" in df_res.columns:
+        springs = df_res[df_res["is_spring"] == True]
+        if not springs.empty: acc_signals.append(f"⚡ *SPRING:* {', '.join(springs['Hisse'].head(3).tolist())}")
+    
+    if "stopping_volume" in df_res.columns:
+        st_vols = df_res[df_res["stopping_volume"] == True]
+        if not st_vols.empty: acc_signals.append(f"🛡️ *STOP VOL:* {', '.join(st_vols['Hisse'].head(3).tolist())}")
+
+    if acc_signals:
+        msg += "🧩 *AKÜMÜLASYON ANALİZİ*\n"
+        msg += "\n".join(acc_signals) + "\n\n"
             
     return msg
