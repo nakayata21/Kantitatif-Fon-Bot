@@ -57,18 +57,21 @@ jobs:
           git config --global user.name "AI Signals Logger"
           git config --global user.email "logger@github.com"
           
-          # Değişiklikleri Commit Et (Database ve Cache)
+          # 1. Dosyaları Ekle ve Commit Et (Zaten bir şeyler varsa)
           git add signals_log.db || true
-          git add .cache/ohlcv/*.parquet || true
-          git commit -m "Auto-log: Recorded signals for ${{ matrix.market }} [skip ci]" || echo "No changes to commit"
+          git commit -m "Auto-log: Recorded signals for ${{ matrix.market }} [skip ci]" || echo "Değişiklik yok"
           
-          # Çakışmaları Stash-Rebase-Pop ile çözüyoruz
-          git stash --include-untracked || echo "Stashlenecek bir şey yok"
-          git fetch origin main
-          git pull --rebase origin main
-          git stash pop || echo "Pop yapacak bir şey yok"
+          # 2. Üstteki çakışmaları önlemek için Güçlü Stash Kontrolü
+          if ! git diff --quiet || ! git diff --cached --quiet; then
+            git add -u
+            git stash --include-untracked
+          fi
           
-          # Karmaşık matris çakışmalarını çözmek için döngülü push
+          # 3. Pull ve Push Döngüsü (Retry Mekanizması ile)
           for i in {1..5}; do
-            git push origin main && break || (git pull --rebase origin main && sleep $((RANDOM % 10 + 1)))
+            git fetch origin main
+            git pull --rebase origin main && \
+            (git stash pop || true) && \
+            git push origin main && break || \
+            (sleep $((RANDOM % 10 + 2)))
           done

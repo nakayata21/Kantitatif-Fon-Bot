@@ -109,8 +109,8 @@ def query_experience_memory(current_row, feature_list):
         with open(path, "rb") as f:
             mem = pickle.load(f)
         
-        # Mevcut özellikleri al ve eksik değerleri temizle
-        current_feats = current_row[feature_list].fillna(0).values.reshape(1, -1)
+        # Mevcut özellikleri al ve eksik değerleri temizle (FutureWarning fix)
+        current_feats = current_row[feature_list].fillna(0).infer_objects(copy=False).values.reshape(1, -1)
         mem_feats = mem['features'][feature_list].fillna(0).values
         mem_targets = mem['targets']
         
