@@ -114,6 +114,11 @@ def add_indicators(df: pd.DataFrame, index_df: pd.DataFrame = None) -> pd.DataFr
     out["ema20_slope"] = out["ema20"].pct_change(5) * 100
     out["roc20"] = out["close"].pct_change(20) * 100
 
+    # Stochastic RSI
+    stoch_rsi = ta.momentum.StochRSIIndicator(close=out["close"], window=14, smooth1=3, smooth2=3, fillna=True)
+    out["stoch_k"] = stoch_rsi.stochrsi_k() * 100
+    out["stoch_d"] = stoch_rsi.stochrsi_d() * 100
+
     out["obv"] = ta.volume.OnBalanceVolumeIndicator(close=out["close"], volume=out["volume"], fillna=True).on_balance_volume()
     out["mfi"] = ta.volume.MFIIndicator(high=out["high"], low=out["low"], close=out["close"], volume=out["volume"], window=14, fillna=True).money_flow_index()
     

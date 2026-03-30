@@ -1,5 +1,6 @@
 from utils import clamp, _safe_get
 from adaptive_weights import load_adaptive_weights
+from policy_optimizer import TradingPolicyOptimizer
 import numpy as np
 import pandas as pd
 import pickle
@@ -422,11 +423,20 @@ def score_symbol(last: pd.Series, prev: pd.Series, conf_last: pd.Series, market:
     is_near_bottom = (support_120_val > 0) and (((close_val - support_120_val) / support_120_val) * 100 <= 5.0)
     is_volume_up = (vol_spike_val >= 1.3)
 
+    # --- Stochastic RSI Dönüşü (YENİ) ---
+    stoch_k = float(_safe_get(last, "stoch_k", 50.0))
+    stoch_d = float(_safe_get(last, "stoch_d", 50.0))
+    prev_stoch_k = float(_safe_get(prev, "stoch_k", 50.0))
+    prev_stoch_d = float(_safe_get(prev, "stoch_d", 50.0))
+    
+    stoch_oversold_cross = (stoch_k < 25) and (stoch_k > stoch_d) and (prev_stoch_k <= prev_stoch_d)
+
     dip = 0.0
     dip_signals = []
     
     dip += 25 if is_rsi_oversold else 0
     dip += 15 if is_rsi_rising else 0
+    dip += 30 if stoch_oversold_cross else 0 # StochRSI Golden Cross Bonusu
     dip += 20 if macd_cross_up else 0
     dip += 15 if _safe_get(last, "pos_div", False) else 0
     dip += 15 if is_price_above_ma20 else 0
@@ -451,6 +461,7 @@ def score_symbol(last: pd.Series, prev: pd.Series, conf_last: pd.Series, market:
     
     if is_rsi_oversold: dip_signals.append("✓ RSI Aşırı Satım")
     if is_rsi_rising: dip_signals.append("✓ RSI Dönüşü")
+    if stoch_oversold_cross: dip_signals.append("✓ StochRSI Dip Kesişimi")
     if macd_cross_up: dip_signals.append("✓ MACD Kesti")
     if is_price_above_ma20: dip_signals.append("✓ MA20 Kırıldı")
     if is_near_bottom: dip_signals.append("✓ Destek Bölgesi")

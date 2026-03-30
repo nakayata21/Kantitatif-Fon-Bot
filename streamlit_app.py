@@ -636,13 +636,16 @@ def render_backtest_tab():
         with st.spinner(f"{symbol} geçmiş verileri analiz ediliyor..."):
             try:
                 from data_fetcher import fetch_hist, interval_obj
-                from indicators import TIMEFRAME_OPTIONS, add_indicators
+                from constants import TIMEFRAME_OPTIONS
+                from indicators import add_indicators
+                from tvDatafeed import TvDatafeed
                 
+                tv = TvDatafeed()
                 tf = TIMEFRAME_OPTIONS["Gunluk"]
                 exch = "BIST" if market == "BIST" else ("BINANCE" if market == "CRYPTO" else "NASDAQ")
                 
                 # 600 bar geriye gidiyoruz ki bol sinyal yakalayalım
-                raw_df = fetch_hist(st.session_state.tv, symbol, exch, interval_obj(tf["base"]), 600)
+                raw_df = fetch_hist(tv, symbol, exch, interval_obj(tf["base"]), 600)
                 if raw_df is None or raw_df.empty:
                     st.error("Veri alınamadı! Lütfen sembolü kontrol edin.")
                     return

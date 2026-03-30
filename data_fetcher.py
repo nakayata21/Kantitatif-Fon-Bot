@@ -7,6 +7,7 @@ import requests
 import yfinance as yf
 from typing import Dict, List, Optional, Tuple
 from datetime import datetime
+from policy_optimizer import TradingPolicyOptimizer
 
 # --- Streamlit Optional Check ---
 try:
@@ -400,50 +401,69 @@ def interval_obj(key: str):
 
 def fetch_hist(tv, symbol: str, exchange: str, interval, bars: int, retries: int = 3):
     # --- 1. ÖNCE YEREL CACHE'E BAK ---
-    # Interval nesnesi TV enum ise '1d', '4h' vb. string'e çevirelim (key için)
     int_str = str(interval).split('.')[-1]
     cached_df = load_from_cache(symbol, exchange, int_str)
     
-    # Cache'te yeterli ve güncel veri var mı?
-    # Eğer son bar 1 saati aşmıyorsa (kısa vadeli ise) veya bugüne aitse (günlük ise)
-    if not cached_df.empty and len(cached_df) >= bars:
+    now = datetime.now()
+    day_of_week = now.weekday() # 5=Cmt, 6=Pazar
+
+    # Cache'te veri var mı ve güncel mi?
+    if not cached_df.empty:
         last_t = cached_df.index[-1]
-        now = datetime.now()
-        # Çok kaba bir "güncellik" kontrolü (günlük veri için)
-        is_fresh = (now - last_t).total_seconds() < 3600 * 12 # 12 saatten yeniyse
-        if is_fresh:
-            # print(f"   💾 {symbol} Yerel Cache'ten yüklendi.")
+        
+        # Akıllı Güncellik Kontrolü (Pazar Modu Dahil)
+        is_fresh = False
+        if (now - last_t).total_seconds() < 3600 * 4: # 4 saatten yeniyse (Kripto için önemli)
+            is_fresh = True
+        elif day_of_week >= 5 and exchange in ["BIST", "NASDAQ"]:
+            # Hafta sonu ve son veri Cuma gününe aitse taze say
+            # Not: pd.Timestamp.weekday Cuma=4
+            if hasattr(last_t, "weekday") and last_t.weekday() >= 4:
+                is_fresh = True
+        
+        if is_fresh and len(cached_df) >= bars:
             return cached_df.tail(bars)
 
+    # --- 2. ARTIMLI VERİ ÇEKME (INCREMENTAL FETCH) ---
+    # Ne kadar bar çekmeliyiz?
+    fetch_n = bars
+    if not cached_df.empty:
+        last_t = cached_df.index[-1]
+        # Aradaki bar sayısını tahmin et (Emniyet payıyla)
+        diff_hours = (now - last_t).total_seconds() / 3600
+        
+        if "daily" in int_str.lower():
+            # Günlükte 1 gün = 1 bar. Aradaki gün sayısı + 3 bar buffer
+            fetch_n = max(5, min(bars, int(diff_hours / 24) + 3))
+        elif "4_hour" in int_str.lower() or "4h" in int_str.lower():
+            # 4 saatlikte 1 gün = 6 bar. 
+            fetch_n = max(10, min(bars, int(diff_hours / 4) + 4))
+
     last_err: Exception = RuntimeError("bilinmeyen hata")
-    # GitHub Action (veya hız gerektiren işler) için deneme sayısını 2'ye düşürüyoruz (hızlı fallback için)
     effective_retries = 2
     
     for i in range(effective_retries):
         try:
-            # Sadece eksik barları çekmek teoride mümkün ama TV'de tümünü çekmek daha stabil
-            d = tv.get_hist(symbol=symbol, exchange=exchange, interval=interval, n_bars=bars)
-            if d is not None and not len(d) == 0:
-                # Cache ile birleştir
+            # Sadece ihtiyacımız olan 'fetch_n' kadar çekiyoruz (Hız kazandırır)
+            d = tv.get_hist(symbol=symbol, exchange=exchange, interval=interval, n_bars=fetch_n)
+            
+            if d is not None and not d.empty:
+                # Cache ile birleştir ve kaydet
                 if not cached_df.empty:
-                    # Yeni veriyi ekle ve dublikatları sil
-                    new_df = pd.concat([cached_df, d]).drop_duplicates()
-                    new_df = new_df[~new_df.index.duplicated(keep='last')].sort_index()
-                    save_to_cache(new_df, symbol, exchange, int_str)
-                    return new_df.tail(bars)
+                    # Yeni veriyi ekle, eskilerle birleştir ve mükerrerleri (overwrite) temizle
+                    full_df = pd.concat([cached_df, d])
+                    full_df = full_df[~full_df.index.duplicated(keep='last')].sort_index()
+                    save_to_cache(full_df, symbol, exchange, int_str)
+                    return full_df.tail(bars)
                 else:
                     save_to_cache(d, symbol, exchange, int_str)
                     return d
             
-            err_msg = "API bos DataFrame dondu"
-            last_err = RuntimeError(f"{err_msg} (deneme {i+1}/{effective_retries})")
+            last_err = RuntimeError(f"API boş döndü (deneme {i+1})")
         except Exception as e:
             raw_err = str(e).lower()
-            last_err = RuntimeError(f"{type(e).__name__}: {e} (deneme {i+1}/{effective_retries})")
-            
-            # Eğer hata 'timeout' veya 'connection' ile ilgiliyse bir kez daha denemek yerine direkt fallback'e geçebiliriz
-            # (Çünkü GitHub IP'si muhtemelen kalıcı olarak bloklanmıştır veya TradingView o an cevap vermiyordur)
-            if "timeout" in raw_err or "connection" in raw_err or "no data" in raw_err:
+            last_err = RuntimeError(f"{e} (deneme {i+1})")
+            if any(x in raw_err for x in ["timeout", "connection", "no data"]):
                 break
         
         # Exponential backoff + random jitter for rate limits

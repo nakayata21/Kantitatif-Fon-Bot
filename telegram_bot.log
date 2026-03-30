@@ -7,3 +7,381 @@ you are using nologin method, data you access may be limited
 2026-03-29 10:55:26.997 WARNING streamlit.runtime.caching.cache_data_api: No runtime found, using MemoryCacheStorageManager
 2026-03-29 10:55:27.001 WARNING streamlit.runtime.caching.cache_data_api: No runtime found, using MemoryCacheStorageManager
 2026-03-29 10:55:27.003 WARNING streamlit.runtime.scriptrunner_utils.script_run_context: Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+you are using nologin method, data you access may be limited
+2026-03-29 23:30:26.642 WARNING streamlit.runtime.scriptrunner_utils.script_run_context: Thread 'Thread-1': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-03-29 23:30:26.922 
+  [33m[1mWarning:[0m to view this Streamlit app on a browser, run it with the following
+  command:
+
+    streamlit run telegram_autopilot.py [ARGUMENTS]
+2026-03-29 23:30:26.922 Thread 'Thread-1': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-03-29 23:30:26.924 Thread 'Thread-1': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-03-29 23:30:26.924 Thread 'Thread-1': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-03-29 23:30:27.436 Thread 'Thread-3': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-03-29 23:30:27.442 Thread 'Thread-3': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-03-29 23:30:27.447 Thread 'Thread-3': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-03-29 23:30:31.264 Thread 'Thread-1': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-03-29 23:30:31.264 Thread 'Thread-1': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-03-29 23:30:31.264 Thread 'Thread-1': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-03-29 23:30:32.760 No runtime found, using MemoryCacheStorageManager
+WARNING:tvDatafeed.main:you are using nologin method, data you access may be limited
+2026-03-29 23:30:33.537 Thread 'Thread-1': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+ERROR:tvDatafeed.main:Connection to remote host was lost.
+ERROR:tvDatafeed.main:no data, please check the exchange and symbol
+ERROR:tvDatafeed.main:The read operation timed out
+ERROR:tvDatafeed.main:no data, please check the exchange and symbol
+ERROR:tvDatafeed.main:Connection to remote host was lost.
+ERROR:tvDatafeed.main:no data, please check the exchange and symbol
+ERROR:tvDatafeed.main:Connection to remote host was lost.
+ERROR:tvDatafeed.main:no data, please check the exchange and symbol
+ERROR:tvDatafeed.main:Connection to remote host was lost.
+ERROR:tvDatafeed.main:no data, please check the exchange and symbol
+ERROR:tvDatafeed.main:The read operation timed out
+ERROR:tvDatafeed.main:no data, please check the exchange and symbol
+ERROR:tvDatafeed.main:Connection to remote host was lost.
+ERROR:tvDatafeed.main:no data, please check the exchange and symbol
+ERROR:tvDatafeed.main:Connection to remote host was lost.
+ERROR:tvDatafeed.main:no data, please check the exchange and symbol
+ERROR:tvDatafeed.main:Connection to remote host was lost.
+ERROR:tvDatafeed.main:no data, please check the exchange and symbol
+ERROR:tvDatafeed.main:Connection to remote host was lost.
+ERROR:tvDatafeed.main:no data, please check the exchange and symbol
+ERROR:tvDatafeed.main:Connection to remote host was lost.
+ERROR:tvDatafeed.main:no data, please check the exchange and symbol
+ERROR:tvDatafeed.main:Connection to remote host was lost.
+ERROR:tvDatafeed.main:no data, please check the exchange and symbol
+ERROR:tvDatafeed.main:The read operation timed out
+ERROR:tvDatafeed.main:no data, please check the exchange and symbol
+ERROR:tvDatafeed.main:The read operation timed out
+ERROR:tvDatafeed.main:no data, please check the exchange and symbol
+ERROR:tvDatafeed.main:Connection to remote host was lost.
+ERROR:tvDatafeed.main:no data, please check the exchange and symbol
+ERROR:tvDatafeed.main:Connection to remote host was lost.
+ERROR:tvDatafeed.main:no data, please check the exchange and symbol
+ERROR:tvDatafeed.main:The read operation timed out
+ERROR:tvDatafeed.main:no data, please check the exchange and symbol
+ERROR:tvDatafeed.main:The read operation timed out
+ERROR:tvDatafeed.main:no data, please check the exchange and symbol
+ERROR:tvDatafeed.main:The read operation timed out
+ERROR:tvDatafeed.main:no data, please check the exchange and symbol
+ERROR:tvDatafeed.main:The read operation timed out
+ERROR:tvDatafeed.main:no data, please check the exchange and symbol
+ERROR:tvDatafeed.main:The read operation timed out
+ERROR:tvDatafeed.main:no data, please check the exchange and symbol
+ERROR:tvDatafeed.main:The read operation timed out
+ERROR:tvDatafeed.main:no data, please check the exchange and symbol
+ERROR:tvDatafeed.main:The read operation timed out
+ERROR:tvDatafeed.main:no data, please check the exchange and symbol
+ERROR:tvDatafeed.main:The read operation timed out
+ERROR:tvDatafeed.main:no data, please check the exchange and symbol
+ERROR:tvDatafeed.main:The read operation timed out
+ERROR:tvDatafeed.main:no data, please check the exchange and symbol
+ERROR:tvDatafeed.main:The read operation timed out
+ERROR:tvDatafeed.main:no data, please check the exchange and symbol
+ERROR:tvDatafeed.main:The read operation timed out
+ERROR:tvDatafeed.main:no data, please check the exchange and symbol
+ERROR:tvDatafeed.main:The read operation timed out
+ERROR:tvDatafeed.main:no data, please check the exchange and symbol
+ERROR:tvDatafeed.main:The read operation timed out
+ERROR:tvDatafeed.main:no data, please check the exchange and symbol
+ERROR:tvDatafeed.main:The read operation timed out
+ERROR:tvDatafeed.main:no data, please check the exchange and symbol
+ERROR:tvDatafeed.main:The read operation timed out
+ERROR:tvDatafeed.main:no data, please check the exchange and symbol
+ERROR:tvDatafeed.main:The read operation timed out
+ERROR:tvDatafeed.main:no data, please check the exchange and symbol
+ERROR:tvDatafeed.main:Connection to remote host was lost.
+ERROR:tvDatafeed.main:no data, please check the exchange and symbol
+ERROR:tvDatafeed.main:The read operation timed out
+ERROR:tvDatafeed.main:no data, please check the exchange and symbol
+ERROR:tvDatafeed.main:The read operation timed out
+ERROR:tvDatafeed.main:no data, please check the exchange and symbol
+ERROR:tvDatafeed.main:The read operation timed out
+ERROR:tvDatafeed.main:no data, please check the exchange and symbol
+ERROR:tvDatafeed.main:The read operation timed out
+ERROR:tvDatafeed.main:no data, please check the exchange and symbol
+ERROR:tvDatafeed.main:The read operation timed out
+ERROR:tvDatafeed.main:no data, please check the exchange and symbol
+ERROR:tvDatafeed.main:The read operation timed out
+ERROR:tvDatafeed.main:no data, please check the exchange and symbol
+ERROR:tvDatafeed.main:The read operation timed out
+ERROR:tvDatafeed.main:no data, please check the exchange and symbol
+ERROR:tvDatafeed.main:The read operation timed out
+ERROR:tvDatafeed.main:no data, please check the exchange and symbol
+ERROR:tvDatafeed.main:The read operation timed out
+ERROR:tvDatafeed.main:no data, please check the exchange and symbol
+ERROR:tvDatafeed.main:The read operation timed out
+ERROR:tvDatafeed.main:no data, please check the exchange and symbol
+ERROR:tvDatafeed.main:The read operation timed out
+ERROR:tvDatafeed.main:no data, please check the exchange and symbol
+ERROR:tvDatafeed.main:The read operation timed out
+ERROR:tvDatafeed.main:no data, please check the exchange and symbol
+ERROR:tvDatafeed.main:The read operation timed out
+ERROR:tvDatafeed.main:no data, please check the exchange and symbol
+ERROR:tvDatafeed.main:The read operation timed out
+ERROR:tvDatafeed.main:no data, please check the exchange and symbol
+ERROR:tvDatafeed.main:The read operation timed out
+ERROR:tvDatafeed.main:no data, please check the exchange and symbol
+ERROR:tvDatafeed.main:The read operation timed out
+ERROR:tvDatafeed.main:no data, please check the exchange and symbol
+ERROR:tvDatafeed.main:The read operation timed out
+ERROR:tvDatafeed.main:no data, please check the exchange and symbol
+ERROR:tvDatafeed.main:The read operation timed out
+ERROR:tvDatafeed.main:no data, please check the exchange and symbol
+ERROR:tvDatafeed.main:The read operation timed out
+ERROR:tvDatafeed.main:no data, please check the exchange and symbol
+ERROR:tvDatafeed.main:The read operation timed out
+ERROR:tvDatafeed.main:no data, please check the exchange and symbol
+ERROR:tvDatafeed.main:The read operation timed out
+ERROR:tvDatafeed.main:no data, please check the exchange and symbol
+ERROR:tvDatafeed.main:The read operation timed out
+ERROR:tvDatafeed.main:no data, please check the exchange and symbol
+ERROR:tvDatafeed.main:The read operation timed out
+ERROR:tvDatafeed.main:no data, please check the exchange and symbol
+ERROR:tvDatafeed.main:The read operation timed out
+ERROR:tvDatafeed.main:no data, please check the exchange and symbol
+ERROR:tvDatafeed.main:The read operation timed out
+ERROR:tvDatafeed.main:no data, please check the exchange and symbol
+ERROR:tvDatafeed.main:The read operation timed out
+ERROR:tvDatafeed.main:no data, please check the exchange and symbol
+ERROR:tvDatafeed.main:The read operation timed out
+ERROR:tvDatafeed.main:no data, please check the exchange and symbol
+ERROR:tvDatafeed.main:Connection to remote host was lost.
+ERROR:tvDatafeed.main:no data, please check the exchange and symbol
+ERROR:tvDatafeed.main:The read operation timed out
+ERROR:tvDatafeed.main:no data, please check the exchange and symbol
+ERROR:tvDatafeed.main:The read operation timed out
+ERROR:tvDatafeed.main:no data, please check the exchange and symbol
+ERROR:tvDatafeed.main:The read operation timed out
+ERROR:tvDatafeed.main:no data, please check the exchange and symbol
+ERROR:tvDatafeed.main:The read operation timed out
+ERROR:tvDatafeed.main:no data, please check the exchange and symbol
+ERROR:tvDatafeed.main:The read operation timed out
+ERROR:tvDatafeed.main:no data, please check the exchange and symbol
+ERROR:tvDatafeed.main:The read operation timed out
+ERROR:tvDatafeed.main:no data, please check the exchange and symbol
+ERROR:tvDatafeed.main:The read operation timed out
+ERROR:tvDatafeed.main:no data, please check the exchange and symbol
+ERROR:tvDatafeed.main:The read operation timed out
+ERROR:tvDatafeed.main:no data, please check the exchange and symbol
+ERROR:tvDatafeed.main:The read operation timed out
+ERROR:tvDatafeed.main:no data, please check the exchange and symbol
+ERROR:tvDatafeed.main:The read operation timed out
+ERROR:tvDatafeed.main:no data, please check the exchange and symbol
+ERROR:tvDatafeed.main:The read operation timed out
+ERROR:tvDatafeed.main:no data, please check the exchange and symbol
+ERROR:tvDatafeed.main:The read operation timed out
+ERROR:tvDatafeed.main:no data, please check the exchange and symbol
+ERROR:tvDatafeed.main:The read operation timed out
+ERROR:tvDatafeed.main:no data, please check the exchange and symbol
+ERROR:tvDatafeed.main:The read operation timed out
+ERROR:tvDatafeed.main:no data, please check the exchange and symbol
+ERROR:tvDatafeed.main:The read operation timed out
+ERROR:tvDatafeed.main:no data, please check the exchange and symbol
+ERROR:tvDatafeed.main:The read operation timed out
+ERROR:tvDatafeed.main:no data, please check the exchange and symbol
+ERROR:tvDatafeed.main:The read operation timed out
+ERROR:tvDatafeed.main:no data, please check the exchange and symbol
+ERROR:tvDatafeed.main:The read operation timed out
+ERROR:tvDatafeed.main:no data, please check the exchange and symbol
+ERROR:tvDatafeed.main:The read operation timed out
+ERROR:tvDatafeed.main:no data, please check the exchange and symbol
+ERROR:tvDatafeed.main:The read operation timed out
+ERROR:tvDatafeed.main:no data, please check the exchange and symbol
+ERROR:tvDatafeed.main:The read operation timed out
+ERROR:tvDatafeed.main:no data, please check the exchange and symbol
+ERROR:tvDatafeed.main:The read operation timed out
+ERROR:tvDatafeed.main:no data, please check the exchange and symbol
+ERROR:tvDatafeed.main:The read operation timed out
+ERROR:tvDatafeed.main:no data, please check the exchange and symbol
+ERROR:tvDatafeed.main:The read operation timed out
+ERROR:tvDatafeed.main:no data, please check the exchange and symbol
+ERROR:tvDatafeed.main:The read operation timed out
+ERROR:tvDatafeed.main:no data, please check the exchange and symbol
+ERROR:tvDatafeed.main:The read operation timed out
+ERROR:tvDatafeed.main:no data, please check the exchange and symbol
+ERROR:tvDatafeed.main:The read operation timed out
+ERROR:tvDatafeed.main:no data, please check the exchange and symbol
+ERROR:tvDatafeed.main:The read operation timed out
+ERROR:tvDatafeed.main:no data, please check the exchange and symbol
+ERROR:tvDatafeed.main:The read operation timed out
+ERROR:tvDatafeed.main:no data, please check the exchange and symbol
+ERROR:tvDatafeed.main:The read operation timed out
+ERROR:tvDatafeed.main:no data, please check the exchange and symbol
+ERROR:tvDatafeed.main:The read operation timed out
+ERROR:tvDatafeed.main:no data, please check the exchange and symbol
+ERROR:tvDatafeed.main:The read operation timed out
+ERROR:tvDatafeed.main:no data, please check the exchange and symbol
+ERROR:tvDatafeed.main:The read operation timed out
+ERROR:tvDatafeed.main:no data, please check the exchange and symbol
+ERROR:tvDatafeed.main:The read operation timed out
+ERROR:tvDatafeed.main:no data, please check the exchange and symbol
+ERROR:tvDatafeed.main:The read operation timed out
+ERROR:tvDatafeed.main:no data, please check the exchange and symbol
+ERROR:tvDatafeed.main:The read operation timed out
+ERROR:tvDatafeed.main:no data, please check the exchange and symbol
+ERROR:tvDatafeed.main:The read operation timed out
+ERROR:tvDatafeed.main:no data, please check the exchange and symbol
+ERROR:tvDatafeed.main:The read operation timed out
+ERROR:tvDatafeed.main:no data, please check the exchange and symbol
+ERROR:tvDatafeed.main:The read operation timed out
+ERROR:tvDatafeed.main:no data, please check the exchange and symbol
+ERROR:tvDatafeed.main:The read operation timed out
+ERROR:tvDatafeed.main:no data, please check the exchange and symbol
+ERROR:tvDatafeed.main:The read operation timed out
+ERROR:tvDatafeed.main:no data, please check the exchange and symbol
+ERROR:tvDatafeed.main:The read operation timed out
+ERROR:tvDatafeed.main:no data, please check the exchange and symbol
+ERROR:tvDatafeed.main:The read operation timed out
+ERROR:tvDatafeed.main:no data, please check the exchange and symbol
+ERROR:tvDatafeed.main:The read operation timed out
+ERROR:tvDatafeed.main:no data, please check the exchange and symbol
+ERROR:tvDatafeed.main:The read operation timed out
+ERROR:tvDatafeed.main:no data, please check the exchange and symbol
+ERROR:tvDatafeed.main:The read operation timed out
+ERROR:tvDatafeed.main:no data, please check the exchange and symbol
+ERROR:tvDatafeed.main:The read operation timed out
+ERROR:tvDatafeed.main:no data, please check the exchange and symbol
+ERROR:tvDatafeed.main:The read operation timed out
+ERROR:tvDatafeed.main:no data, please check the exchange and symbol
+ERROR:tvDatafeed.main:The read operation timed out
+ERROR:tvDatafeed.main:no data, please check the exchange and symbol
+ERROR:tvDatafeed.main:The read operation timed out
+ERROR:tvDatafeed.main:no data, please check the exchange and symbol
+ERROR:tvDatafeed.main:The read operation timed out
+ERROR:tvDatafeed.main:no data, please check the exchange and symbol
+ERROR:tvDatafeed.main:The read operation timed out
+ERROR:tvDatafeed.main:no data, please check the exchange and symbol
+ERROR:tvDatafeed.main:The read operation timed out
+ERROR:tvDatafeed.main:no data, please check the exchange and symbol
+WARNING:tvDatafeed.main:you are using nologin method, data you access may be limited
+2026-03-29 23:45:27.405 Thread 'Thread-1': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-03-29 23:45:27.405 Thread 'Thread-1': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-03-29 23:45:27.405 Thread 'Thread-1': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-03-29 23:45:27.406 Thread 'Thread-1': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-03-29 23:45:27.907 Thread 'Thread-15': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-03-29 23:45:27.907 Thread 'Thread-15': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-03-29 23:45:27.908 Thread 'Thread-15': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-03-29 23:45:31.598 Thread 'Thread-1': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-03-29 23:45:31.598 Thread 'Thread-1': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-03-29 23:45:31.598 Thread 'Thread-1': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+WARNING:tvDatafeed.main:you are using nologin method, data you access may be limited
+2026-03-29 23:45:33.433 Thread 'Thread-1': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+ERROR:tvDatafeed.main:Connection to remote host was lost.
+ERROR:tvDatafeed.main:no data, please check the exchange and symbol
+ERROR:tvDatafeed.main:Connection to remote host was lost.
+ERROR:tvDatafeed.main:no data, please check the exchange and symbol
+ERROR:tvDatafeed.main:Connection to remote host was lost.
+ERROR:tvDatafeed.main:no data, please check the exchange and symbol
+ERROR:tvDatafeed.main:Connection to remote host was lost.
+ERROR:tvDatafeed.main:no data, please check the exchange and symbol
+ERROR:tvDatafeed.main:Connection to remote host was lost.
+ERROR:tvDatafeed.main:no data, please check the exchange and symbol
+ERROR:tvDatafeed.main:Connection to remote host was lost.
+ERROR:tvDatafeed.main:no data, please check the exchange and symbol
+ERROR:tvDatafeed.main:Connection to remote host was lost.
+ERROR:tvDatafeed.main:no data, please check the exchange and symbol
+ERROR:tvDatafeed.main:The read operation timed out
+ERROR:tvDatafeed.main:no data, please check the exchange and symbol
+ERROR:tvDatafeed.main:The read operation timed out
+ERROR:tvDatafeed.main:no data, please check the exchange and symbol
+ERROR:tvDatafeed.main:The read operation timed out
+ERROR:tvDatafeed.main:no data, please check the exchange and symbol
+ERROR:tvDatafeed.main:Connection to remote host was lost.
+ERROR:tvDatafeed.main:no data, please check the exchange and symbol
+ERROR:tvDatafeed.main:The read operation timed out
+ERROR:tvDatafeed.main:no data, please check the exchange and symbol
+ERROR:tvDatafeed.main:The read operation timed out
+ERROR:tvDatafeed.main:no data, please check the exchange and symbol
+ERROR:tvDatafeed.main:The read operation timed out
+ERROR:tvDatafeed.main:no data, please check the exchange and symbol
+ERROR:tvDatafeed.main:The read operation timed out
+ERROR:tvDatafeed.main:no data, please check the exchange and symbol
+ERROR:tvDatafeed.main:The read operation timed out
+ERROR:tvDatafeed.main:no data, please check the exchange and symbol
+ERROR:tvDatafeed.main:The read operation timed out
+ERROR:tvDatafeed.main:no data, please check the exchange and symbol
+ERROR:tvDatafeed.main:The read operation timed out
+ERROR:tvDatafeed.main:no data, please check the exchange and symbol
+ERROR:tvDatafeed.main:The read operation timed out
+ERROR:tvDatafeed.main:no data, please check the exchange and symbol
+ERROR:tvDatafeed.main:The read operation timed out
+ERROR:tvDatafeed.main:no data, please check the exchange and symbol
+ERROR:tvDatafeed.main:The read operation timed out
+ERROR:tvDatafeed.main:no data, please check the exchange and symbol
+ERROR:tvDatafeed.main:The read operation timed out
+ERROR:tvDatafeed.main:no data, please check the exchange and symbol
+ERROR:tvDatafeed.main:The read operation timed out
+ERROR:tvDatafeed.main:no data, please check the exchange and symbol
+ERROR:tvDatafeed.main:Connection to remote host was lost.
+ERROR:tvDatafeed.main:no data, please check the exchange and symbol
+ERROR:tvDatafeed.main:Connection to remote host was lost.
+ERROR:tvDatafeed.main:no data, please check the exchange and symbol
+ERROR:tvDatafeed.main:The read operation timed out
+ERROR:tvDatafeed.main:no data, please check the exchange and symbol
+ERROR:tvDatafeed.main:The read operation timed out
+ERROR:tvDatafeed.main:no data, please check the exchange and symbol
+ERROR:tvDatafeed.main:The read operation timed out
+ERROR:tvDatafeed.main:no data, please check the exchange and symbol
+ERROR:tvDatafeed.main:The read operation timed out
+ERROR:tvDatafeed.main:no data, please check the exchange and symbol
+ERROR:tvDatafeed.main:The read operation timed out
+ERROR:tvDatafeed.main:no data, please check the exchange and symbol
+ERROR:tvDatafeed.main:The read operation timed out
+ERROR:tvDatafeed.main:no data, please check the exchange and symbol
+ERROR:tvDatafeed.main:The read operation timed out
+ERROR:tvDatafeed.main:no data, please check the exchange and symbol
+ERROR:tvDatafeed.main:The read operation timed out
+ERROR:tvDatafeed.main:no data, please check the exchange and symbol
+ERROR:tvDatafeed.main:The read operation timed out
+ERROR:tvDatafeed.main:no data, please check the exchange and symbol
+ERROR:tvDatafeed.main:The read operation timed out
+ERROR:tvDatafeed.main:no data, please check the exchange and symbol
+ERROR:tvDatafeed.main:The read operation timed out
+ERROR:tvDatafeed.main:no data, please check the exchange and symbol
+ERROR:tvDatafeed.main:The read operation timed out
+ERROR:tvDatafeed.main:no data, please check the exchange and symbol
+ERROR:tvDatafeed.main:The read operation timed out
+ERROR:tvDatafeed.main:no data, please check the exchange and symbol
+ERROR:tvDatafeed.main:The read operation timed out
+ERROR:tvDatafeed.main:no data, please check the exchange and symbol
+ERROR:tvDatafeed.main:The read operation timed out
+ERROR:tvDatafeed.main:no data, please check the exchange and symbol
+ERROR:tvDatafeed.main:The read operation timed out
+ERROR:tvDatafeed.main:no data, please check the exchange and symbol
+ERROR:tvDatafeed.main:The read operation timed out
+ERROR:tvDatafeed.main:no data, please check the exchange and symbol
+ERROR:tvDatafeed.main:Connection to remote host was lost.
+ERROR:tvDatafeed.main:no data, please check the exchange and symbol
+ERROR:tvDatafeed.main:The read operation timed out
+ERROR:tvDatafeed.main:no data, please check the exchange and symbol
+ERROR:tvDatafeed.main:The read operation timed out
+ERROR:tvDatafeed.main:no data, please check the exchange and symbol
+ERROR:tvDatafeed.main:The read operation timed out
+ERROR:tvDatafeed.main:no data, please check the exchange and symbol
+ERROR:tvDatafeed.main:The read operation timed out
+ERROR:tvDatafeed.main:no data, please check the exchange and symbol
+ERROR:tvDatafeed.main:The read operation timed out
+ERROR:tvDatafeed.main:no data, please check the exchange and symbol
+ERROR:tvDatafeed.main:The read operation timed out
+ERROR:tvDatafeed.main:no data, please check the exchange and symbol
+ERROR:tvDatafeed.main:The read operation timed out
+ERROR:tvDatafeed.main:no data, please check the exchange and symbol
+ERROR:tvDatafeed.main:The read operation timed out
+ERROR:tvDatafeed.main:no data, please check the exchange and symbol
+ERROR:tvDatafeed.main:The read operation timed out
+ERROR:tvDatafeed.main:no data, please check the exchange and symbol
+ERROR:tvDatafeed.main:The read operation timed out
+ERROR:tvDatafeed.main:no data, please check the exchange and symbol
+ERROR:tvDatafeed.main:The read operation timed out
+ERROR:tvDatafeed.main:no data, please check the exchange and symbol
+ERROR:tvDatafeed.main:The read operation timed out
+ERROR:tvDatafeed.main:no data, please check the exchange and symbol
+ERROR:tvDatafeed.main:The read operation timed out
+ERROR:tvDatafeed.main:no data, please check the exchange and symbol
+ERROR:tvDatafeed.main:The read operation timed out
+ERROR:tvDatafeed.main:no data, please check the exchange and symbol
+ERROR:tvDatafeed.main:The read operation timed out
+ERROR:tvDatafeed.main:no data, please check the exchange and symbol
+ERROR:tvDatafeed.main:The read operation timed out
+ERROR:tvDatafeed.main:no data, please check the exchange and symbol

@@ -1,10 +1,10 @@
-name: 15 Dakikalık Otomatik Tarama
+name: Otomatik Tarama (Durduruldu)
 
 on:
-  schedule:
-    # Pazartesi-Cuma, 06:00-21:00 UTC (TR: 09:00 - 00:00) arası her 15 dakikada bir
-    - cron: '*/15 6-20 * * 1-5'
-  workflow_dispatch: # Manuel tetikleme için
+  # schedule:
+  #   # Pazartesi-Cuma, 06:00-21:00 UTC (TR: 09:00 - 00:00) arası her 15 dakikada bir
+  #   - cron: '*/15 6-20 * * 1-5'
+  workflow_dispatch: # Sadece Manuel Tetikleme İçin Bırakıldı
 
 permissions:
   contents: write
@@ -19,7 +19,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        market: [BIST, NASDAQ, CRYPTO]
+        market: [BIST, NASDAQ] # CRYPTO Modülü Çıkartıldı
     timeout-minutes: 45
     concurrency:
       group: ${{ github.workflow }}-${{ matrix.market }}-${{ github.ref }}
@@ -51,15 +51,24 @@ jobs:
           max_attempts: 2
           command: python github_scan_action.py
 
-      - name: Sinyalleri Kaydet ve Pushla (Kendi Kendine Öğrenme İçin)
+      - name: Sinyalleri Kaydet ve Pushla
         if: always()
         run: |
           git config --global user.name "AI Signals Logger"
           git config --global user.email "logger@github.com"
+          
+          # Değişiklikleri Commit Et (Database ve Cache)
+          git add signals_log.db || true
+          git add .cache/ohlcv/*.parquet || true
+          git commit -m "Auto-log: Recorded signals for ${{ matrix.market }} [skip ci]" || echo "No changes to commit"
+          
+          # Çakışmaları Stash-Rebase-Pop ile çözüyoruz
+          git stash --include-untracked || echo "Stashlenecek bir şey yok"
           git fetch origin main
-          git add signals_log.db
-          git commit -m "Auto-log: Recorded signals [skip ci]" || echo "No changes to commit"
-          # Birleştirme çakışmalarını önlemek için commit sonrası rebase yapıyoruz
+          git pull --rebase origin main
+          git stash pop || echo "Pop yapacak bir şey yok"
+          
+          # Karmaşık matris çakışmalarını çözmek için döngülü push
           for i in {1..5}; do
-            git pull --rebase origin main && git push origin main && break || (git fetch origin main && git pull --rebase origin main && sleep $((RANDOM % 10 + 1)))
+            git push origin main && break || (git pull --rebase origin main && sleep $((RANDOM % 10 + 1)))
           done
