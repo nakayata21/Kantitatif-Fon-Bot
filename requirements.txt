@@ -17,3 +17,8 @@ python-dotenv
 pyarrow
 
 aiohttp
+torch
+transformers
+beautifulsoup4
+lxml
+emoji

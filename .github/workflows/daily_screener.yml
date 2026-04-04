@@ -1,10 +1,10 @@
-name: Otomatik Tarama (Durduruldu)
+name: Otomatik Tarama (Aktif)
 
 on:
-  # schedule:
-  #   # Pazartesi-Cuma, 06:00-21:00 UTC (TR: 09:00 - 00:00) arası her 15 dakikada bir
-  #   - cron: '*/15 6-20 * * 1-5'
-  workflow_dispatch: # Sadece Manuel Tetikleme İçin Bırakıldı
+  schedule:
+    # Pazartesi-Cuma, 06:00-21:00 UTC (TR: 09:00 - 00:00) arası her 15 dakikada bir
+    - cron: '*/15 6-20 * * 1-5'
+  workflow_dispatch: # Manuel Tetikleme İmkanı
 
 permissions:
   contents: write
