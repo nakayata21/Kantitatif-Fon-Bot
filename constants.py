@@ -15,19 +15,27 @@ TIMEFRAME_OPTIONS = {
 }
 
 DEFAULT_NASDAQ_HISSELER = [
-    "AAPL", "MSFT", "GOOG", "GOOGL", "AMZN", "NVDA", "META", "TSLA", "AVGO", "PEP",
-    "COST", "CSCO", "TMUS", "ADBE", "TXN", "QCOM", "AMGN", "INTU", "ISRG", "CMCSA",
-    "AMD", "HON", "NFLX", "SBUX", "GILD", "BKNG", "AMAT", "ADI", "MDLZ", "VRTX",
-    "REGN", "PANW", "MU", "MELI", "SNPS", "CDNS", "KLAC", "CSX", "PYPL", "MAR",
-    "ASML", "ORLY", "MNST", "WBD", "LULU", "CRWD", "FTNT", "KDP", "CHTR", "CTAS",
-    "DXCM", "ABNB", "WDAY", "ODFL", "ROST", "KHC", "PAYX", "IDXX", "BIIB", "AEP",
-    "CPRT", "MRVL", "EA", "PCAR", "ILMN", "FAST", "VRSK", "CEG", "EXC", "DLTR",
-    "VRSN", "ALGN", "WBA", "BKR", "BMRN", "SWKS", "CDW", "TSCO", "SIRI", "ZM",
-    "CRSP", "DOCU", "PLTR", "RIVN", "LCID", "COIN", "U", "DKNG", "HOOD", "AFRM",
-    "JD", "PDD", "BIDU", "NTES", "BABA", "TCEHY", "NIO", "XPEV", "LI",
-    "SMCI", "ARM", "MSTR", "TGT", "WMT", "JPM", "BAC", "GS", "MS", "CVX", "XOM", "UNH",
-    "LLY", "V", "MA", "ABBV", "KO", "PFE", "DIS", "NKE", "VZ", "T", "BA", "CAT",
-    "IBM", "ORCL", "CRM", "INTC", "UBER", "ABNB", "SHOP", "SQ", "SE", "SNAP", "DASH"
+    "AAPL", "MSFT", "GOOG", "AMZN", "NVDA", "META", "TSLA", "AVGO", "PEP", "COST",
+    "CSCO", "AZN", "ADBE", "TXN", "QCOM", "TMUS", "AMGN", "INTU", "ISRG", "HON",
+    "AMAT", "BKNG", "VRTX", "ADI", "MDLZ", "ADP", "PANW", "REGN", "MU", "SNPS",
+    "CDNS", "MELI", "PYPL", "ASML", "KLAC", "CTAS", "CSX", "MAR", "MNST", "ORLY",
+    "LULU", "WDAY", "MNST", "ADSK", "KDP", "CHTR", "CRWD", "DXCM", "AEP", "PAYX",
+    "MSTR", "IDXX", "ROST", "EXC", "KHC", "BIIB", "PCAR", "EA", "MRVL", "CPRT",
+    "ODFL", "AZO", "SGEN", "FAST", "VRSK", "SIRI", "ALGN", "CEG", "WBD", "EBAY",
+    "ANSS", "TEAM", "DDOG", "JD", "BIDU", "DLTR", "LCID", "DOCU", "ZM", "OKTA"
+]
+
+DEFAULT_BIST_100 = [
+    "AKBNK", "ARCLK", "ASELS", "ASTOR", "BIMAS", "ALARK", "EKGYO", "ENKAI", "EREGL", "FROTO",
+    "GARAN", "GUBRF", "HALKB", "HEKTS", "ISCTR", "KCHOL", "KOZAA", "KOZAL", "KRDMD", "ODAS",
+    "OYAKC", "PGSUS", "SAHOL", "SASA", "SISE", "TCELL", "THYAO", "TOASO", "TUPRS", "YKBNK",
+    "AEFES", "AGHOL", "AHGAZ", "AKCNS", "AKSA", "AKSEN", "ALBRK", "ALFAS", "ANSGR", "BAGFS",
+    "BERA", "BRSAN", "BRYAT", "BUCIM", "CANTE", "CCOLA", "CIMSA", "CWENE", "DOAS", "DOHOL",
+    "ECILC", "ECZYT", "EGEEN", "ENJSA", "EUPWR", "GESAN", "GLYHO", "GOZDE", "GWIND", "IPEKE",
+    "ISDMR", "ISFIN", "ISGYO", "ISMEN", "IZMDC", "KARSN", "KAYSE", "KCAER", "KLRHO", "KMPUR",
+    "KONTR", "KONYA", "KORDS", "MAVI", "MGROS", "MIATK", "MPARK", "OTKAR", "OYAYO", "OZKGY",
+    "PENTA", "PETKM", "QUAGR", "REEDR", "SAYAS", "SDTTR", "SMRTG", "SOKM", "TABGD", "TARKM",
+    "TATEN", "TAVHL", "TKFEN", "TKNSA", "TMSN", "TRGYO", "TSKB", "TTKOM", "TTRAK", "ULKER"
 ]
 
 DEFAULT_BIST_HISSELER = [
@@ -35,20 +43,20 @@ DEFAULT_BIST_HISSELER = [
     "AKENR", "AKFGY", "AKFYE", "AKGRT", "AKMGY", "AKSA", "AKSEN", "AKSGY", "AKSUE", "AKYHO", "ALARK", "ALBRK",
     "ALCAR", "ALCTL", "ALFAS", "ALGYO", "ALKA", "ALKIM", "ALMAD", "ALTNY", "ALVES", "ANELE", "ANGEN", "ANHYT",
     "ANSGR", "ARASE", "ARCLK", "ARDYZ", "ARENA", "ARSAN", "ARTMS", "ARZUM", "ASELS", "ASGYO", "ASTOR", "ASUZU",
-    "ATAGY", "ATAKP", "ATATP", "ATEKS", "ATLAS", "ATSYH", "AVGYO", "AVHOL", "AVOD", "AVTUR", "AYCES", "AYDEM",
+    "ATAGY", "ATAKP", "ATATP", "ATEKS", "ATLAS", "ATSYH", "AVGYO", "AVHOL", "AVOD", "AVPGY", "AVTUR", "AYCES", "AYDEM",
     "AYEN", "AYES", "AYGAZ", "AZTEK", "BAGFS", "BAKAB", "BALAT", "BANVT", "BARMA", "BASGZ", "BAYRK", "BEAYO",
     "BERA", "BEYAZ", "BFREN", "BGYO", "BIENY", "BIGCH", "BIMAS", "BINHO", "BIOEN", "BIZIM", "BJKAS", "BLCYT",
     "BMSCH", "BMSTL", "BNTAS", "BOBET", "BOSSA", "BOYNER", "BRIS", "BRKO", "BRKSN", "BRKVY", "BRLSM", "BRMEN",
-    "BRSAN", "BRYAT", "BTCIM", "BUCIM", "BURCE", "BURVA", "BVSAN", "BYDNR", "CANTE", "CASA", "CATES", "CCOLA",
-    "CELHA", "CEMAS", "CEMTS", "CEOEM", "CMENT", "CONSE", "CORBS", "COSMO", "CRDFA", "CRFSA", "CUSAN", "CVKMD",
+    "BRSAN", "BRYAT", "BSOKE", "BTCIM", "BUCIM", "BURCE", "BURVA", "BVSAN", "BYDNR", "CANTE", "CASA", "CATES", "CCOLA",
+    "CELHA", "CEMAS", "CEMTS", "CEOEM", "CIMSA", "CLEBI", "CMENT", "CONSE", "CORBS", "COSMO", "CRDFA", "CRFSA", "CUSAN", "CVKMD",
     "CWENE", "DAGHL", "DAGI", "DAPGM", "DARDL", "DERHL", "DERIM", "DESA", "DESPC", "DEVA", "DGATE", "DGGYO",
-    "DGNMO", "DIRIT", "DITAS", "DMRGD", "DMSAS", "DOAS", "DOBUR", "DOCO", "DOGUB", "DOHOL", "DOKTA", "DURDO",
-    "DYOBY", "DZGYO", "EBEBK", "ECILC", "ECZYT", "EDATA", "EDIP", "EGEEN", "EGGUB", "EGPRO", "EGSER", "EKGYO",
+    "DGNMO", "DIRIT", "DITAS", "DMRGD", "DMSAS", "DOAS", "DOBUR", "DOCO", "DOGUB", "DOHOL", "DOKTA", "DSTKF", "DURDO",
+    "DYOBY", "DZGYO", "EBEBK", "ECILC", "ECZYT", "EDATA", "EDIP", "EFORC", "EGEEN", "EGGUB", "EGPRO", "EGSER", "EKGYO",
     "EKIZ", "EKOS", "EKSUN", "ELITE", "EMKEL", "ENJSA", "ENKAI", "ENSRI", "ENTRA", "EPLAS", "ERBOS", "ERCB",
     "EREGL", "ERSU", "ESCAR", "ESCOM", "ESEN", "ETILR", "EUHOL", "EUKYO", "EUPWR", "EUREN", "EUYO", "EYGYO",
     "FADE", "FASIL", "FENER", "FLAP", "FMIZP", "FONET", "FORMT", "FORTE", "FRIGO", "FROTO", "FZLGY", "GARAN",
     "GARFA", "GEDIK", "GEDZA", "GENIL", "GENTS", "GEREL", "GESAN", "GIPTA", "GLBMD", "GLCVY", "GLRYH", "GLYHO",
-    "GMTAS", "GOKNR", "GOLTS", "GOODY", "GOZDE", "GRNYO", "GRSEL", "GSDDE", "GSDHO", "GSRAY", "GUBRF", "GWIND",
+    "GMTAS", "GOKNR", "GOLTS", "GOODY", "GOZDE", "GRNYO", "GRSEL", "GRTHO", "GSDDE", "GSDHO", "GSRAY", "GUBRF", "GWIND",
     "HALKB", "HATEK", "HATSN", "HDFGS", "HEDEF", "HEKTS", "HKTM", "HLGYO", "HTTBT", "HUBVC", "HUNER", "HURGZ",
     "ICBCT", "ICUGS", "IDGYO", "IEYHO", "IHAAS", "IHLAS", "IHLGM", "IHYAY", "IMASM", "INDES", "INFO", "INGRM",
     "INTEM", "INVEO", "INVES", "IPEKE", "ISATR", "ISBIR", "ISBTR", "ISCTR", "ISDMR", "ISFIN", "ISGSY", "ISGYO",
@@ -61,13 +69,13 @@ DEFAULT_BIST_HISSELER = [
     "MANAS", "MARKA", "MARTI", "MAVI", "MAXDD", "MEDTR", "MEGAP", "MEKAG", "MEPET", "MERCN", "MERIT", "MERKO",
     "METRO", "METUR", "MGROS", "MHRGY", "MIATK", "MIPAZ", "MMCAS", "MNDRS", "MNDTR", "MOBTL", "MOGAN", "MPARK",
     "MRGYO", "MRSHL", "MSGYO", "MTRKS", "MTRYO", "MUHAL", "MUREN", "MZHLD", "NATEN", "NETAS", "NIBAS", "NTGAZ",
-    "NTHOL", "NUGYO", "NUHCM", "OBASE", "OBAMG", "ODAS", "OFSYM", "ONCSM", "ORCAY", "ORGE", "ORMA", "OSMEN",
+    "NTHOL", "NUGYO", "NUHCM", "OBASE", "OBAMS", "ODAS", "OFSYM", "ONCSM", "ORCAY", "ORGE", "ORMA", "OSMEN",
     "OSTIM", "OTKAR", "OTTO", "OYAKC", "OYAYO", "OYLUM", "OYYAT", "OZGYO", "OZKGY", "OZRDN", "OZSUB", "PAGYO",
-    "PAMEL", "PAPIL", "PARSN", "PASEU", "PATEK", "PCILT", "PEGYO", "PEKGY", "PENGD", "PENTA", "PETKM", "PETUN",
+    "PAHOL", "PAMEL", "PAPIL", "PARSN", "PASEU", "PATEK", "PCILT", "PEGYO", "PEKGY", "PENGD", "PENTA", "PETKM", "PETUN",
     "PGSUS", "PINSU", "PKART", "PKENT", "PLTUR", "PNLSN", "PNSUT", "POLHO", "POLTK", "PRDGS", "PRKAB", "PRKME",
     "PRZMA", "PSGYO", "PSUTC", "PTFS", "QNBFB", "QNBFL", "QUAGR", "RALYH", "RAYSG", "REEDR", "RNPOL", "RODRG",
     "ROYAL", "RTALB", "RUBNS", "RYGYO", "RYSAS", "SAHOL", "SAMAT", "SANEL", "SANFM", "SANKO", "SARKY", "SASA",
-    "SAYAS", "SDTTR", "SEGYO", "SEKFK", "SEKUR", "SELEC", "SELGD", "SELVA", "SEYKM", "SILVR", "SINKO", "SNGYO",
+    "SAYAS", "SDTTR", "SEGYO", "SEKFK", "SEKUR", "SELEC", "SELGD", "SELVA", "SEYKM", "SILVR", "SINKO", "SISE", "SKBNK", "SMRTG", "SNGYO",
     "SNICA", "SNKRN", "SNPAM", "SOKE", "SOKM", "SONME", "SRVGY", "SUMAS", "SUNTK", "SURGY", "SUWEN", "TABGD",
     "TARKM", "TATEN", "TATGD", "TAVHL", "TBORG", "TCELL", "TDGYO", "TEKTU", "TERA", "TETMT", "TEZOL", "TGSAS",
     "THYAO", "TKFEN", "TKNSA", "TLMAN", "TMPOL", "TMSN", "TOASO", "TRCAS", "TRGYO", "TRILC", "TSGYO", "TSKB",
@@ -100,6 +108,12 @@ DEFAULT_CRYPTO_SYMBOLS = [
     "NEOUSDT", "CFXUSDT", "JTOUSDT", "CHZUSDT", "AEVOUSDT", "DYMUSDT", "MINAUSDT",
     "BLURUSDT", "WLDUSDT", "KCSUSDT", "XDCUSDT", "ZKUSDT", "IOUSDT", "ZILUSDT", "BOMEUSDT"
 ]
+
+# Dip skoru — scoring.py ve Streamlit listeleri aynı eşikleri kullanır
+DIP_SOLID_BOTTOM_MIN = 45  # "sağlam dip": DİPTEN DÖNÜYOR, odak üst bandı
+DIP_SOFT_LIST_MIN = 35  # "dip adayı" listesi; odak skorunda (dip-35) ölçeği
+DIP_ODAK_WEAK_MIN = 30  # Odak skorunda zayıf dip katkısı eşiği
+DIP_BB_OVERBOUGHT_RATIO = 0.85  # BB % üstü: dip puanına ceza
 
 BIST_SECTORS = {
     "AKBNK": "Banka", "GARAN": "Banka", "ISCTR": "Banka", "YKBNK": "Banka", "HALKB": "Banka", "VAKBN": "Banka",

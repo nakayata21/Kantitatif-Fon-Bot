@@ -5,7 +5,8 @@ from signals_db import get_unlabeled_signals, update_label, get_training_data, i
 from sklearn.model_selection import TimeSeriesSplit
 from sklearn.preprocessing import StandardScaler
 from sklearn.pipeline import Pipeline
-from sklearn.metrics import accuracy_score, roc_auc_score
+from sklearn.metrics import accuracy_score, classification_report, log_loss, roc_auc_score
+from sklearn.utils.class_weight import compute_class_weight
 from sklearn.calibration import CalibratedClassifierCV
 import pickle
 import os
@@ -54,10 +55,10 @@ MODEL_ARCHIVE_DIR = "model_archive"
 os.makedirs(MODEL_ARCHIVE_DIR, exist_ok=True)
 
 # =====================================================================
-# EĞİTİM VE ETİKETLEME AYARLARI
-TP_PERCENT = 5.0   # Örnek Kâr Bariyeri
-SL_PERCENT = 3.0   # Örnek Zarar Bariyeri
-MAX_DAYS   = 10    # Maksimum bekleme günü
+# EĞİTİM VE ETİKETLEME AYARLARI (ADAPTİF BARRIYER)
+TP_ATR_MULT = 2.0   # ATR'nin kaç katı Kar?
+SL_ATR_MULT = 1.2   # ATR'nin kaç katı Zarar?
+MAX_DAYS    = 10    # Maksimum bekleme günü
 # =====================================================================
 
 # --- OPTIMIZED LABELING ---
@@ -96,6 +97,8 @@ def get_cached_history(symbol, exchange):
             if data is not None and not data.empty:
                 # Sütun isimlerini yfinance formatına uyarla
                 data = data.rename(columns={'open': 'Open', 'high': 'High', 'low': 'Low', 'close': 'Close', 'volume': 'Volume'})
+                from indicators import add_indicators
+                data = add_indicators(data) # Göstergeleri ekle (ATR dahil)
                 _history_cache[symbol] = data
                 return data
     except:
@@ -108,10 +111,19 @@ def apply_triple_barrier_optimized(row):
     if history is None or history.empty: return None, None, None, None, None
     
     entry_price = row['price_at_signal']
-    tp_level = entry_price * (1 + TP_PERCENT / 100)
-    sl_level = entry_price * (1 - SL_PERCENT / 100)
-    
     signal_time = pd.to_datetime(row['time_at_signal'])
+    
+    # Sinyal anındaki ATR'yi bul
+    past_bars = history[history.index <= signal_time]
+    if past_bars.empty or 'atr' not in past_bars.columns:
+        # ATR yoksa sabit %5/%3 fallback kullan
+        tp_level = entry_price * 1.05
+        sl_level = entry_price * 0.97
+    else:
+        current_atr = float(past_bars['atr'].iloc[-1])
+        tp_level = entry_price + (current_atr * TP_ATR_MULT)
+        sl_level = entry_price - (current_atr * SL_ATR_MULT)
+    
     # Veriyi sinyal zamanından sonrasına filtrele
     future_bars = history[history.index > signal_time].head(MAX_DAYS)
     
@@ -170,12 +182,42 @@ def label_past_signals():
             )
             success += 1
 
+            # --- REINFORCEMENT LEARNING (Pekiştirmeli Öğrenme) DÖNGÜSÜ ---
+            # Gerçek sonuç belli oldu. "Kâr = Ödül", "Zarar/Risk = Ceza" mantığıyla robotu eğit.
+            try:
+                from rl_policy import get_rl_agent
+                rl_agent = get_rl_agent()
+                
+                # O anki durumu state olarak belirle
+                feat_dict = _json.loads(row.get('features', '{}'))
+                rsi_val = float(feat_dict.get('rsi', 50))
+                trend_score = float(feat_dict.get('ema20_slope', 0))
+                ai_conf = 0.5  # Şimdilik standart
+                
+                # Rejimi belirle (Basit)
+                regime = "bull" if trend_score > 0 else "bear"
+                state = (regime, rsi_val, trend_score, ai_conf)
+                
+                # Geçmişteki eylemi "AL (1)" kabul ediyoruz çünkü sinyal listesindeler
+                action_id = 1 
+                
+                # RL robotuna "Alım yapmıştın, sonucu bu oldu, öğren!" de.
+                rl_agent.learn_from_outcome(state, action_id, outcome, label_type)
+            except Exception as e:
+                print(f"⚠️ RL Öğrenme hatası: {e}")
+
             # Fizik özelliklerini features JSON'una ekle
             if physics_ok:
                 try:
+                    # KRİTİK FİX: Sadece sinyal anına kadar olan veriyi kullan (Forward Leak Önleme)
                     hist = get_cached_history(row['symbol'], row['exchange'])
                     if hist is not None and not hist.empty:
-                        phys_feats = physics_engine.extract(hist)
+                        # Index'i datetime'a çevir ve sinyal anına göre dilimle
+                        hist.index = pd.to_datetime(hist.index).tz_localize(None)
+                        sig_time = pd.to_datetime(row['time_at_signal']).tz_localize(None)
+                        past_hist = hist[hist.index <= sig_time]
+                        
+                        phys_feats = physics_engine.extract(past_hist)
                         if phys_feats:
                             existing = _json.loads(row.get('features', '{}'))
                             existing.update({f"phys_{k}": v for k, v in phys_feats.items()})
@@ -192,61 +234,88 @@ def label_past_signals():
 
 # --- AUTO-ML OPTIMIZATION (OPTUNA) ---
 
-def objective(trial, X, y, best_config):
+def objective(trial, X, y, best_config, sample_weight=None):
     algo = best_config.get("algo", "xgb")
     
+    # --- DENGESİZ VERİ (CLASS WEIGHT) HESABI ---
+    cw = compute_class_weight('balanced', classes=np.unique(y), y=y)
+    pos_weight = cw[1] / cw[0] if len(cw) > 1 else 1.0
+
     if algo == "xgb" and HAS_XGB:
         params = {
-            'n_estimators': trial.suggest_int('n_estimators', 100, 1000),
-            'max_depth': trial.suggest_int('max_depth', 3, 10),
-            'learning_rate': trial.suggest_float('learning_rate', 0.01, 0.1),
+            'n_estimators': trial.suggest_int('n_estimators', 100, 1500),
+            'max_depth': trial.suggest_int('max_depth', 3, 12),
+            'learning_rate': trial.suggest_float('learning_rate', 0.005, 0.1),
             'subsample': trial.suggest_float('subsample', 0.5, 1.0),
             'colsample_bytree': trial.suggest_float('colsample_bytree', 0.5, 1.0),
             'gamma': trial.suggest_float('gamma', 0, 5),
+            'reg_alpha': trial.suggest_float('reg_alpha', 1e-8, 10.0, log=True),
+            'reg_lambda': trial.suggest_float('reg_lambda', 1e-8, 10.0, log=True),
+            'scale_pos_weight': pos_weight,
             'random_state': 42,
             'eval_metric': 'logloss',
             'n_jobs': -1
         }
     elif algo == "rf":
         params = {
-            'n_estimators': trial.suggest_int('n_estimators', 50, 1000),
-            'max_depth': trial.suggest_int('max_depth', 5, 20),
-            'min_samples_split': trial.suggest_int('min_samples_split', 2, 10),
+            'n_estimators': trial.suggest_int('n_estimators', 100, 1000),
+            'max_depth': trial.suggest_int('max_depth', 5, 25),
+            'min_samples_split': trial.suggest_int('min_samples_split', 2, 12),
+            'class_weight': 'balanced',
             'random_state': 42,
             'n_jobs': -1
         }
-    else: # Gradient Boosting (gb) or Fallback
-        params = {
-            'n_estimators': trial.suggest_int('n_estimators', 50, 500),
-            'max_depth': trial.suggest_int('max_depth', 3, 12),
-            'learning_rate': trial.suggest_float('learning_rate', 0.01, 0.2),
-            'random_state': 42
-        }
+    else:
+        params = {'n_estimators': 100, 'random_state': 42}
     
-    # Zaman Serisi Çapraz Doğrulama
-    tscv = TimeSeriesSplit(n_splits=3)
+    # Stratified Split (Daha akılcı bir dağılım)
+    from sklearn.model_selection import StratifiedKFold
+    from sklearn.metrics import log_loss, f1_score
+    
+    skf = StratifiedKFold(n_splits=3, shuffle=True, random_state=42)
     scores = []
     
-    # create_model logic here
     evolver = EvolvingArchitecture()
     
-    for train_idx, val_idx in tscv.split(X):
-        X_train, X_val = X.iloc[train_idx], X.iloc[val_idx]
-        y_train, y_val = y.iloc[train_idx], y.iloc[val_idx]
+    for train_idx, val_idx in skf.split(X, y):
+        if hasattr(X, 'iloc'):
+            X_train, X_val = X.iloc[train_idx], X.iloc[val_idx]
+        else:
+            X_train, X_val = X[train_idx], X[val_idx]
+            
+        if hasattr(y, 'iloc'):
+            y_train, y_val = y.iloc[train_idx], y.iloc[val_idx]
+        else:
+            y_train, y_val = y[train_idx], y[val_idx]
+            
+        sw_train = sample_weight[train_idx] if sample_weight is not None else None
         
-        model = evolver._create_model(best_config)
-        
-        # YENİ GÜVENLİ VERSİYON:
-        valid_params = model.get_params().keys() # Modelin kabul ettiği ayarları al
+        model = evolver._create_model(best_config, y_train)
+        valid_params = model.get_params().keys()
         filtered_params = {k: v for k, v in params.items() if k in valid_params}
         model.set_params(**filtered_params)
         
-        model.fit(X_train, y_train)
+        # Ağırlıklı eğitim
+        if sw_train is not None:
+            model.fit(X_train, y_train, sample_weight=sw_train)
+        else:
+            model.fit(X_train, y_train)
+            
         pred = model.predict_proba(X_val)[:, 1]
-        from sklearn.metrics import log_loss
-        scores.append(log_loss(y_val, pred))
-    
-    return sum(scores) / len(scores)
+        
+        # Otonom Mantık: Yanlış Alarmları (False Positive) şiddetle cezalandır
+        # Trade sisteminde para kaybettiren asıl sebep yanlış alımdır.
+        base_loss = log_loss(y_val, pred)
+        pred_bin = (pred > 0.6).astype(int)
+        
+        # False Positivelere (Zarar Ettiren Sinyaller) Özel Ceza
+        fp_mask = (y_val == 0) & (pred_bin == 1)
+        fp_penalty = fp_mask.sum() * 0.5 # Her yanlış AL sinyaline +0.5 loss cezası
+        
+        total_loss = base_loss + (fp_penalty / len(y_val))
+        scores.append(total_loss)
+        
+    return np.mean(scores)
 
 def train_best_model(X, y, best_params, best_config=None):
     if best_config:
@@ -361,6 +430,18 @@ class EvolvingFeatureFactory:
             new_df['feat_trend_strength'] = df['adx'] * df['ema20_slope']
             candidates.append('feat_trend_strength')
 
+        if 'hurst_exponent' in features and 'adx' in features:
+            new_df['feat_trend_persistence'] = df['hurst_exponent'] * df['adx']
+            candidates.append('feat_trend_persistence')
+
+        if 'kalman_deviation' in features and 'atr_pct' in features:
+            new_df['feat_kalman_atr_ratio'] = df['kalman_deviation'] / (df['atr_pct'] + 0.1)
+            candidates.append('feat_kalman_atr_ratio')
+        
+        if 'stoch_k' in features and 'mfi' in features:
+            new_df['feat_overbought_mfi'] = df['stoch_k'] * df['mfi']
+            candidates.append('feat_overbought_mfi')
+
         # 2. Seçim (Mutual Information ile En İyileri Bul)
         from sklearn.feature_selection import mutual_info_classif
         y = df['target']
@@ -473,11 +554,13 @@ class CausalFeatureFilter:
 
 class RegimeAdaptiveEnsemble:
     def __init__(self):
-        # Sinyal anındaki endeks getirisine göre rejimleri ayırıyoruz
+        # Sinyal anındaki endeks getirisi ve Hurst değerine göre rejimleri ayırıyoruz
+        # Not: Hurst metritği physics_engine'den gelir (phys_hurst_exponent)
         self.regimes = {
-            'bull': 'index_return_5d > 1.5',
-            'bear': 'index_return_5d < -1.5',
-            'sideways': 'abs(index_return_5d) <= 1.5'
+            'bull_trend': 'index_return_5d > 1.0 and phys_hurst_exponent > 0.55',
+            'bear_trend': 'index_return_5d < -1.0 and phys_hurst_exponent > 0.55',
+            'mean_reversion': 'phys_hurst_exponent < 0.45',
+            'sideways': 'abs(index_return_5d) <= 1.0 and (0.45 <= phys_hurst_exponent <= 0.55)'
         }
         self.experts = {}
 
@@ -490,13 +573,20 @@ class RegimeAdaptiveEnsemble:
         for regime_name, condition in self.regimes.items():
             # Veriyi rejime göre filtrele
             try:
-                # Features JSON içinden çıkarılan kolonlara göre filtrele
+                # Kolonlar mevcut mu kontrol et
                 regime_data = data.query(condition)
+                if len(regime_data) < 15:
+                    # Alternatif (Hurst verisi yoksa eski yönteme dön)
+                    if 'index_return_5d' in data.columns:
+                        if 'bull' in regime_name: cond = 'index_return_5d > 1.5'
+                        elif 'bear' in regime_name: cond = 'index_return_5d < -1.5'
+                        else: cond = 'abs(index_return_5d) <= 1.5'
+                        regime_data = data.query(cond)
             except: 
                 regime_data = data
             
             if len(regime_data) < 20:
-                print(f"   ⚠️ {regime_name.upper()} için yetersiz veri (%d), genel model kullanılacak." % len(regime_data))
+                print(f"   ⚠️ {regime_name.upper()} için yetersiz veri ({len(regime_data)}), genel model kullanılacak.")
                 regime_data = data
             
             X_r, y_r = regime_data.drop(columns=['target']), regime_data['target']
@@ -536,7 +626,17 @@ class ActiveLearner:
         if model_pipeline:
             print("🧪 Active Learning: Gri alanlar tespit ediliyor ve ağırlıklandırılıyor...")
             try:
-                probs = model_pipeline.predict_proba(X)[:, 1]
+                # Column alignment fix: old model might have different feature set than current X 
+                if hasattr(model_pipeline, 'feature_names_in_'):
+                    expected_features = model_pipeline.feature_names_in_
+                    X_aligned = pd.DataFrame(index=X.index, columns=expected_features).fillna(0)
+                    for col in X.columns:
+                        if col in expected_features:
+                            X_aligned[col] = X[col]
+                else: 
+                    X_aligned = X
+                    
+                probs = model_pipeline.predict_proba(X_aligned)[:, 1]
                 # 0.5'e (kararsızlık noktası) ne kadar yakınsa ağırlığı o kadar artır
                 # f(0.5) = 3.0 (3 kat ağırlık), f(0) veya f(1) = 1.0 (standart ağırlık)
                 uncertainty = 1.0 - np.abs(probs - 0.5) * 2.0
@@ -549,31 +649,43 @@ class ActiveLearner:
 # --- SYNTHETIC MARKET GENERATOR (Veri Artırımı - Data Augmentation) ---
 
 class SyntheticMarketGenerator:
-    def __init__(self, sample_size=500):
+    def __init__(self, sample_size=800):
         self.sample_size = sample_size
 
     def generate_synthetic_data(self, X, y):
-        """Mevcut verinin istatistiksel profilini kullanarak sentetik veri üretir."""
-        print(f"\n🧪 Sentetik Piyasa Senaryoları Üretiliyor (+{self.sample_size} Örnek)...")
+        """Mevcut verinin istatistiksel profilini (Kovaryans) kullanarak odaklı veri üretir."""
+        if len(X) < 15: return X, y
+        print(f"\n🧪 BOOSTER: Sentetik 'Uzman Senaryoları' Üretiliyor (+{self.sample_size} Örnek)...")
         
-        # Orijinal verinin korelasyonunu ve dağılımını koru
-        mean = X.mean()
-        std = X.std()
-        corr = X.corr().fillna(0) # Korelasyon matrisi
+        # 1. Azınlık Sınıfı Odaklı (Success Patterns)
+        # Genelde AL sinyalleri daha azdır (Imbalance), onları orantısız artırarak 'Nadir' başarıları öğretelim.
+        pos_samples = X[y == 1]
+        neg_samples = X[y == 0]
         
-        # Çok değişkenli normal dağılım kullanarak gerçekçi yapay veri üret
-        # (Copula mantığına en yakın hızlı yöntem)
-        try:
-            synthetic_x = np.random.multivariate_normal(mean, std.values * np.eye(len(mean)), self.sample_size)
-            synthetic_df = pd.DataFrame(synthetic_x, columns=X.columns)
-            
-            # Etiketler için (Basit bir bootstrap: Mevcut y'lerden rastgele seç)
-            synthetic_y = np.random.choice(y, size=self.sample_size)
-            
-            return pd.concat([X, synthetic_df]), np.concatenate([y, synthetic_y])
-        except Exception as e:
-            print(f"   ⚠️ Sentetik veri üretim hatası: {e}")
-            return X, y
+        if len(pos_samples) < 5: # Başarılı örnek çok azsa basit kopyalama + gürültü yap
+             pos_augmented = pos_samples.sample(n=self.sample_size // 2, replace=True) + np.random.normal(0, 0.01, (self.sample_size // 2, X.shape[1]))
+        else:
+             mean_pos = pos_samples.mean()
+             cov_pos = pos_samples.cov().fillna(0) + np.eye(X.shape[1]) * 1e-6
+             pos_augmented = pd.DataFrame(
+                 np.random.multivariate_normal(mean_pos, cov_pos, self.sample_size // 2),
+                 columns=X.columns
+             )
+             
+        # 2. Genel Piyasa Gürültüsü Senaryoları
+        mean_all = X.mean()
+        cov_all = X.cov().fillna(0) + np.eye(X.shape[1]) * 1e-6
+        all_augmented = pd.DataFrame(
+            np.random.multivariate_normal(mean_all, cov_all, self.sample_size // 2),
+            columns=X.columns
+        )
+        
+        # Birleştir
+        X_syn = pd.concat([pos_augmented, all_augmented])
+        y_syn = np.concatenate([np.ones(len(pos_augmented)), np.random.choice([0,1], len(all_augmented), p=[0.7, 0.3])])
+        
+        # Orijinal veriyle harmanla
+        return pd.concat([X, X_syn]), np.concatenate([y, y_syn])
 
 # --- EVOLVING ARCHITECTURE (Evrimsel Algoritma Seçimi) ---
 
@@ -583,27 +695,58 @@ class EvolvingArchitecture:
             {"name": "XGBoost (Standard)", "algo": "xgb", "features": "all"},
             {"name": "XGBoost (Light)", "algo": "xgb", "features": "top10"},
             {"name": "RandomForest (Robust)", "algo": "rf", "features": "all"},
-            {"name": "GradientBoosting (Deep)", "algo": "gb", "features": "all"}
+            {"name": "LFM Deep Learning (Attention CNN)", "algo": "deep", "features": "all"},
+            {"name": "Deep Voting Ensemble (Soft)", "algo": "ensemble", "features": "all"}
         ]
 
-    def _create_model(self, config):
+    def _create_model(self, config, y=None):
+        cw = None
+        if y is not None:
+            try:
+                # Sınıf ağırlıklarını hesapla (Dengesiz veri setleri için: örn %20 win)
+                cw = compute_class_weight('balanced', classes=np.unique(y), y=y)
+                pos_weight = cw[1] / cw[0] if len(cw) > 1 else 1.0
+            except:
+                pos_weight = 1.0
+        else:
+            pos_weight = 1.0
+
         if config["algo"] == "xgb":
-            return get_xgb_clf(n_estimators=100, random_state=42)
-            return get_xgb_clf(n_estimators=100, random_state=42, eval_metric='logloss')
+            return get_xgb_clf(n_estimators=100, random_state=42, scale_pos_weight=pos_weight)
         elif config["algo"] == "rf":
             from sklearn.ensemble import RandomForestClassifier
-            return RandomForestClassifier(n_estimators=100, random_state=42)
-        elif config["algo"] == "gb":
-            from sklearn.ensemble import GradientBoostingClassifier
-            return GradientBoostingClassifier(n_estimators=100, random_state=42)
+            return RandomForestClassifier(n_estimators=100, random_state=42, class_weight='balanced')
+        elif config["algo"] == "deep":
+            try:
+                from deep_learning_core import LFMPyTorchTrainer
+                # X bilgisini almadan shape bilemiyoruz, ama evolution icinde model egitilecek
+                # Bu yuzden bu asagida asil input_dim ile revize edilir. Gecici 50 veriyoruz.
+                # Daha iyisi: evrim cagrildiginda run_evolution icinde shape'i yakalayip set etmek
+                return LFMPyTorchTrainer(input_dim=50) # Fallback, run_evolution'da ezilecek
+            except Exception as e:
+                print(f"⚠️ PyTorch yüklenemedi, XGBoost'a düşülüyor: {e}")
+                return get_xgb_clf(n_estimators=100, random_state=42, scale_pos_weight=pos_weight)
+        elif config["algo"] == "ensemble":
+            from sklearn.ensemble import VotingClassifier, RandomForestClassifier
+            xgb_est = get_xgb_clf(n_estimators=100, random_state=42, scale_pos_weight=pos_weight)
+            rf_est = RandomForestClassifier(n_estimators=100, random_state=42, class_weight='balanced')
+            return VotingClassifier(estimators=[('xgb', xgb_est), ('rf', rf_est)], voting='soft')
 
     def run_evolution(self, X, y):
-        print("\n🧬 Evrimsel Mimari Testi Başlatıldı (Mutation Testing)...")
+        print("\n🧬 Evrimsel Mimari Testi: Dengesiz Veri Kontrolü (Class Weighting)...")
         results = []
         tscv = TimeSeriesSplit(n_splits=3)
         
         for mut in self.mutations:
-            model = self._create_model(mut)
+            model = self._create_model(mut, y) # y bilgisini ağırlık için gönder
+            
+            # Eger PyTorch modeli geldiyse dogru dimension'u inject et
+            if mut["algo"] == "deep" and hasattr(model, "input_dim"):
+                model.input_dim = X.shape[1]
+                # Modeli o shape'e gore yeniden initialize etmeliyiz ki katmanlar duzgun calissin
+                from deep_learning_core import LFMPyTorchTrainer
+                model = LFMPyTorchTrainer(input_dim=X.shape[1], epochs=10) # Hızlı evrim için epoch 10
+            
             scores = []
             for train_idx, val_idx in tscv.split(X):
                 model.fit(X.iloc[train_idx], y.iloc[train_idx])
@@ -687,6 +830,11 @@ class SelfImprovingMetaLearner:
             action = "📈 STRENGTHENING"
             
         return {"threshold": threshold, "action": action}
+
+    def get_latest_summary(self):
+        if not self.history:
+            return None
+        return self.history[-1]
 
 # --- CONFIDENCE CALIBRATION (Olasılık Kalibrasyonu) ---
 
@@ -822,6 +970,54 @@ def walk_forward_validation(X, y, n_windows=4):
         return avg_acc, avg_auc, window_results
     return 0.5, 0.5, []
 
+# --- TRAINING TRIGGER GUARD (Akıllı Eğitim Karar Mekanizması) ---
+
+class TrainingTriggerGuard:
+    """
+    Modelin gerçekten eğitilmeye ihtiyacı olup olmadığını denetler.
+    Kriterler:
+    1. Performans Düşüşü: Son canlı sinyallerde başarı %50 altına düştü mü?
+    2. Veri Hacmi: Son eğitimden bu yana en az 30-50 yeni etiketlenmiş sinyal geldi mi?
+    3. Rejim Değişimi: Rejim dağılımı (Bull/Bear) ciddi oranda kaydı mı?
+    """
+    def __init__(self, signals_db_path="signals_log.db"):
+        self.db_path = signals_db_path
+
+    def should_retrain(self, data, meta_history):
+        print("\n🧐 Training Trigger Guard: Eğitim ihtiyacı analiz ediliyor...")
+        
+        # 1. Veri Hacmi Kontrolü
+        if len(data) < 50:
+            print(f"   ❌ RET: Yetersiz veri ({len(data)} sinyal). En az 50 örnek gerekiyor.")
+            return False
+            
+        # 2. Performans Drift Kontrolü (Son 20 sinyal)
+        last_20_acc = data['target'].tail(20).mean()
+        # Eğer meta geçmişinde son doğruluk varsa kıyasla
+        last_trained_acc = meta_history[-1]['accuracy'] if meta_history else 0.60
+        
+        acc_drop = last_trained_acc - last_20_acc
+        if acc_drop > 0.12: # %12'lik ciddi bir başarı düşüşü varsa
+            print(f"   🚨 ONAY: Performans düşüşü tespit edildi (%{last_20_acc*100:.1f} < %{last_trained_acc*100:.1f}).")
+            return True
+
+        # 3. Veri Tazelik Kontrolü (Son eğitimden bu yana geçen yeni veri sayısı)
+        # Basitçe: Eğer mevcut veri sayısı, son kaydedilen modelin kullandığı örnek sayısından 
+        # %25 fazlaysa veya +50 ise eğit.
+        historical_samples = meta_history[-1].get('samples', 0) if meta_history else 0
+        new_samples = len(data) - historical_samples
+        
+        if new_samples >= 50:
+            print(f"   💎 ONAY: {new_samples} adet yeni deneyim birikti. Öğrenme zamanı.")
+            return True
+            
+        if not meta_history: # İlk kez çalışıyorsa
+            print("   🆕 ONAY: İlk model eğitimi başlatılıyor.")
+            return True
+
+        print(f"   💤 BEKLE: Model hâlâ verimli ({new_samples} yeni veri yetersiz).")
+        return False
+
 # --- MACRO FEATURE INJECTOR (Makro Özellikleri Modele Ekle) ---
 
 class MacroFeatureInjector:
@@ -838,10 +1034,13 @@ class MacroFeatureInjector:
         print("   ℹ️ Makro veri bulunamadı, backfill'den gelecek verilerde eklenecek.")
         return df
 
-def retrain_model():
+def retrain_model(force=False):
     data = get_training_data()
-    if data.empty or len(data) < 50:
-        print(f"⚠️ Yetersiz veri ({len(data)}). Optimizasyon için 50 örnek bekleniyor.")
+    meta = SelfImprovingMetaLearner()
+    
+    # --- 0. EĞİTİM BAŞLATMA KARARI (Logical Tactic) ---
+    trigger_guard = TrainingTriggerGuard()
+    if not force and not trigger_guard.should_retrain(data, meta.history):
         return
 
     # --- 0. MAKRO ÖZELLIK ZENGİNLEŞTİRME ---
@@ -869,14 +1068,35 @@ def retrain_model():
     wf_acc, wf_auc, wf_windows = walk_forward_validation(X, y, n_windows=4)
     print(f"   📊 Walk-Forward Sonuç: Acc=%{wf_acc*100:.1f} | AUC={wf_auc:.3f}")
     
-    # --- 4. OPTUNA HYPERPARAMOPTİMİZASYON ---
-    study = optuna.create_study(direction='minimize') # log_loss minimize edilmeli
+    # --- 4. EXPERTISE ACCELERATION (Booster & Synthetic scenarios) ---
+    syn_gen = SyntheticMarketGenerator(sample_size=max(500, len(X)))
+    X_boost, y_boost = syn_gen.generate_synthetic_data(X, y)
+    
+    active_learner = ActiveLearner()
+    # Mevcut en iyi model varsa onunla ağırlıkları hesapla
+    current_model = None
+    if os.path.exists(MODEL_PATH):
+        try:
+            with open(MODEL_PATH, "rb") as f:
+                exp = pickle.load(f)
+                current_model = exp.get('experts', {}).get('sideways') or exp.get('pipeline')
+        except: pass
+        
+    sample_weights = active_learner.calculate_sample_weights(X_boost, y_boost, current_model)
+    
+    # --- 5. OPTUNA HYPERPARAM OPTİMİZASYON (200+ Trial - LFM ULTRA) ---
     optuna.logging.set_verbosity(optuna.logging.WARNING)
-    study.optimize(lambda t: objective(t, X, y, best_config), n_trials=20)
+    study = optuna.create_study(
+        direction='minimize', 
+        sampler=optuna.samplers.TPESampler(seed=42)
+    )
+    # LFM YÜKSELTMESİ: 200 Trial ile en derin optimizasyon
+    study.optimize(
+        lambda t: objective(t, X_boost, y_boost, best_config, sample_weight=sample_weights), 
+        n_trials=200,
+        n_jobs=-1
+    )
     current_loss = study.best_value
-    current_acc = 1.0 - current_loss # Yaklaşık acc (log_loss'tan türetilmiş)
-    # Gerçek doğruluk skorunu al (en iyi params ile)
-    best_params = study.best_params
     current_acc = wf_acc # Gerçek başarı kriterimiz Walk-Forward başarısıdır
 
     # --- 5. SEVİYE VE STRATEJİ ANALİZİ ---
@@ -962,6 +1182,7 @@ def retrain_model():
         "accuracy": float(current_acc),
         "wf_acc": float(wf_acc),
         "wf_auc": float(wf_auc),
+        "samples": len(data_enriched),
         "date": datetime.now().isoformat(),
         "strategy": strategy["action"]
     })

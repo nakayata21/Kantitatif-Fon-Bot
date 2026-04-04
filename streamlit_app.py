@@ -10,34 +10,88 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # Local imports
-from constants import DEFAULT_NASDAQ_HISSELER, DEFAULT_BIST_HISSELER, DEFAULT_CRYPTO_SYMBOLS, TIMEFRAME_OPTIONS, BIST_SECTORS
+from constants import (
+    DEFAULT_NASDAQ_HISSELER,
+    DEFAULT_BIST_HISSELER,
+    DEFAULT_CRYPTO_SYMBOLS,
+    TIMEFRAME_OPTIONS,
+    BIST_SECTORS,
+    DIP_SOLID_BOTTOM_MIN,
+    DIP_SOFT_LIST_MIN,
+)
 import plotly.express as px
 from utils import send_telegram_message, uniq, clamp, _safe_get
 from indicators import add_indicators, calculate_price_targets
 from scoring import score_symbol, calculate_elite_score
 from ui_components import inject_custom_css, signal_style, action_style
 from data_fetcher import (
-    fetch_quick_fundamentals, fetch_yf_data, 
+    fetch_quick_fundamentals, fetch_yf_data,
     fetch_hist, check_index_health, get_ai_model, interval_obj,
-    fetch_global_indices, get_cached_index_history, to_float
+    fetch_global_indices, get_cached_index_history, to_float,
 )
+from scan_pipeline import prepare_symbol_dataframes, attach_divergence_to_last
 from database import init_db, save_scan_results, get_new_elite_entries
 from signals_db import log_signal, init_db as init_signals_db
 from fundamental_db import init_fund_db
+from data_quality import summarize_scan_coverage, error_symbols
 
+
+def render_data_health_panel(cov: dict) -> None:
+    """Eksik veriyi şeffaf gösterir; müşteri / son kullanıcı güveni için."""
+    req = cov.get("requested", 0)
+    ok = cov.get("rows_ok", 0)
+    pct = cov.get("ok_pct", 0.0)
+    fe = cov.get("fund_ok", 0)
+    fm = cov.get("fund_missing", 0)
+    n_err = cov.get("errors", 0)
+
+    if ok > 0:
+        line = (
+            f"**Veri kapsamı:** {ok}/{req} sembol OHLCV tamamlandı (%{pct}). "
+            f"**Temel analiz (isy):** {fe} dolu"
+        )
+        if fm:
+            line += f", **{fm}** satırda temel veri yok/0 (skorlar teknik ağırlıklı)."
+        if pct >= 90:
+            st.success(line)
+        elif pct >= 70:
+            st.warning(line)
+        else:
+            st.error(line)
+    elif req > 0:
+        st.error(f"**Veri kapsamı:** 0/{req} — tüm sembollerde veri hatası. Aşağıdaki listeyi kontrol edin.")
+
+    low_trust = pct < 85 or n_err > max(3, req // 10)
+    with st.expander("Eksik veri detayı ve iyileştirme önerileri", expanded=bool(low_trust and (n_err or cov.get("tips")))):
+        for t in cov.get("tips") or []:
+            st.markdown(f"- {t}")
+        if not cov.get("tips"):
+            st.caption("Tüm istenen semboller için fiyat verisi alındıysa bu bölüm kısa kalır.")
+        syms = error_symbols(cov.get("error_samples") or [])
+        if syms:
+            st.caption("Hata alınan sembol örnekleri: " + ", ".join(syms[:20]) + ("…" if len(syms) > 20 else ""))
+        samples = cov.get("error_samples") or []
+        if samples:
+            st.code("\n".join(samples), language="text")
 
 
 # --- Veri Tespiti (GUI mi yoksa Script mi?) ---
 try:
     from streamlit.runtime.scriptrunner import get_script_run_ctx
     is_gui = get_script_run_ctx() is not None
-except:
+except Exception:
     is_gui = False
 
 # Initialize DBs
 init_db()
 init_signals_db()
 init_fund_db()
+try:
+    from takas_cluster_db import init_takas_cluster_tables
+
+    init_takas_cluster_tables()
+except Exception:
+    pass
 
 
 def init_gui():
@@ -45,6 +99,7 @@ def init_gui():
     inject_custom_css()
     st.markdown('<p class="main-title">⚡ Gelişmiş Algoritmik Tarayıcı</p>', unsafe_allow_html=True)
     st.caption("Veri Odaklı Kantitatif Yatırım Terminali (VCP, Smart Money & Bollinger Squeeze)")
+
 
     if "piyasa" not in st.session_state:
         st.session_state.piyasa = "NASDAQ"
@@ -64,10 +119,16 @@ def init_gui():
 
     st.sidebar.markdown("---")
     st.sidebar.subheader("📲 Bildirim & AI Ayarları")
-    telegram_token = st.sidebar.text_input("Telegram Bot Token", type="password", key="tg_token_input", value=os.environ.get("TELEGRAM_BOT_TOKEN", "8336526803:AAEvg9b0P9Em5MSND9uCb9RfbTGXBHDGdAA"))
-    telegram_chat_id = st.sidebar.text_input("Telegram Chat ID", key="tg_chat_id_input", value=os.environ.get("TELEGRAM_CHAT_ID", "1070470722"))
+    telegram_token = st.sidebar.text_input(
+        "Telegram Bot Token", type="password", key="tg_token_input",
+        value=os.environ.get("TELEGRAM_BOT_TOKEN", ""),
+    )
+    telegram_chat_id = st.sidebar.text_input(
+        "Telegram Chat ID", key="tg_chat_id_input",
+        value=os.environ.get("TELEGRAM_CHAT_ID", ""),
+    )
     if "or_key_input" not in st.session_state:
-        st.session_state.or_key_input = os.environ.get("OPENROUTER_API_KEY", "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")
+        st.session_state.or_key_input = os.environ.get("OPENROUTER_API_KEY", "")
     
     openrouter_key = st.session_state.or_key_input
 
@@ -79,6 +140,28 @@ def init_gui():
             st.sidebar.dataframe(new_elites[['hisse', 'elite_skor']])
         else:
             st.sidebar.info("Yeni elit hisse bulunamadı.")
+
+    # --- YENİ: AI MODEL YÖNETİMİ (Logical Training Tactic) ---
+    st.sidebar.markdown("---")
+    with st.sidebar.expander("🧠 AI Model Yönetimi", expanded=True):
+        try:
+            from trainer_service import SelfImprovingMetaLearner, label_past_signals, retrain_model
+            meta = SelfImprovingMetaLearner()
+            summary = meta.get_latest_summary()
+            
+            if summary:
+                st.caption(f"📅 Son Eğitim: {summary.get('date', '-')[:16]}")
+                st.metric("Model Başarısı", f"%{summary.get('accuracy', 0)*100:.1f}", delta=f"{summary.get('strategy','')}")
+                st.caption(f"📚 {summary.get('samples', 0)} deneyim ile eğitildi.")
+            
+            if st.button("🔄 Modeli Şimdi Eğit"):
+                with st.spinner("Model eğitiliyor (Veri etiketleme + Optuna)..."):
+                    label_past_signals()
+                    retrain_model(force=True)
+                st.success("✅ Model güncellendi! Lütfen sayfayı yenileyin.")
+                st.rerun()
+        except Exception as e:
+            st.caption(f"Model bilgisi alınamadı: {e}")
 
     if piyasa != st.session_state.piyasa:
         st.session_state.piyasa = piyasa
@@ -111,7 +194,10 @@ def init_gui():
     main_tab1, main_tab2 = st.tabs(["🚀 Sistem Taraması (Screener)", "⏪ Geriye Dönük Test (Backtest)"])
 
     with main_tab1:
-        st.subheader(f"{st.session_state.piyasa} Taraması")
+        st.markdown(
+            f'<p style="font-family:Manrope,sans-serif;font-size:0.7rem;font-weight:800;letter-spacing:0.25em;text-transform:uppercase;color:#94a3b8;margin:0 0 0.75rem 0;">Screener · {st.session_state.piyasa}</p>',
+            unsafe_allow_html=True,
+        )
         symbols_input = st.text_area(f"{st.session_state.piyasa} Semboller", key="symbols_text", height=120)
         symbols = uniq([x.strip().upper() for x in symbols_input.split(",") if x.strip()])
 
@@ -119,18 +205,37 @@ def init_gui():
         with c1:
             tf_name = st.selectbox("Zaman Dilimi", list(TIMEFRAME_OPTIONS.keys()), index=0)
         with c2:
-            delay_ms = st.slider("Sembol Gecikme (ms)", 300, 2000, 500, 50)
+            delay_ms = st.slider(
+                "Sembol gecikme (ms)",
+                min_value=0,
+                max_value=2000,
+                value=100,
+                step=50,
+                help="TradingView hız limiti için; 0–150 ms tipik.",
+            )
         with c3:
             workers = st.selectbox("⚡ Paralel Baglanti", options=[1, 2, 3, 4, 5], index=2)
         with c4:
-            signal_filter = st.selectbox("Sinyal Filtresi", ["Tümü", "Sadece AL", "Sadece ŞORT"], index=0)
+            signal_filter = st.selectbox(
+                "Liste filtresi",
+                [
+                    "Tümü (AL + SAT + BEKLE)",
+                    "Sadece AL",
+                    "SAT ve BEKLE (AL hariç)",
+                    "Sadece ŞORT",
+                    "Yüksek odak skoru (önerilen)",
+                ],
+                index=0,
+            )
 
         if st.button("Taramayi Baslat", type="primary"):
+            st.session_state.scan_symbol_count = len(symbols)
             with st.spinner(f"{st.session_state.piyasa} verileri analiz ediliyor..."):
                 df_res, err_res = run_scan(symbols, st.session_state.piyasa, tf_name, delay_ms, workers=workers)
                 st.session_state.scan_df = df_res
                 st.session_state.scan_errs = err_res
                 st.session_state.scan_time = datetime.now().strftime("%H:%M:%S")
+                st.session_state.last_scan_tf = tf_name
 
                 # DB'ye Kaydet
                 save_scan_results(df_res, st.session_state.piyasa, tf_name)
@@ -155,26 +260,210 @@ def init_gui():
         # --- SONUÇLARI GÖSTER ---
         # Tarama yapılmışsa (veya cache'ten geliyorsa) sonuçları ve hataları göster
         if not st.session_state.scan_df.empty or st.session_state.scan_errs:
-            st.markdown(f"**Son Tarama:** {st.session_state.get('scan_time', '-')} | **Hisse Sayısı:** {len(st.session_state.scan_df)} | **Hata:** {len(st.session_state.scan_errs)}")
-            
+            tf_disp = st.session_state.get("last_scan_tf", tf_name if "tf_name" in locals() else "Gunluk")
+            st.markdown(
+                f"**Son tarama:** {st.session_state.get('scan_time', '-')} · **ZD:** {tf_disp} · "
+                f"**Hisse:** {len(st.session_state.scan_df)} · **Hata:** {len(st.session_state.scan_errs)}"
+            )
+            req_n = st.session_state.get("scan_symbol_count")
+            if req_n is None:
+                req_n = len(st.session_state.scan_df) + len(st.session_state.scan_errs)
+            cov = summarize_scan_coverage(
+                st.session_state.scan_df, int(req_n), st.session_state.scan_errs
+            )
+            render_data_health_panel(cov)
+
             df_to_show = st.session_state.scan_df.copy()
             if signal_filter == "Sadece AL":
                 df_to_show = df_to_show[df_to_show["Sinyal"] == "AL"].copy()
+            elif signal_filter == "SAT ve BEKLE (AL hariç)":
+                df_to_show = df_to_show[df_to_show["Sinyal"].isin(["SAT", "BEKLE", "AÇIĞA SAT"])].copy()
             elif signal_filter == "Sadece ŞORT":
                 df_to_show = df_to_show[df_to_show["Sinyal"] == "AÇIĞA SAT"].copy()
-                
-            cur_tf = tf_name if 'tf_name' in locals() else "Gunluk"
+            elif signal_filter == "Yüksek odak skoru (önerilen)" and "Odak Skoru" in df_to_show.columns:
+                df_to_show = df_to_show[df_to_show["Odak Skoru"] >= 28].copy()
+
+            if not df_to_show.empty:
+                with st.expander("Sıralama ve eşikler", expanded=False):
+                    r1, r2, r3, r4 = st.columns([2, 1, 1, 1])
+                    with r1:
+                        sort_opts = [
+                            "Odak Skoru", "Patlama Skoru", "Kalite", "Toparlanma Skoru", "Toparlanma Katmanı",
+                            "Dip Skor", "Breakout Skor", "Momentum Skor", "Skor",
+                        ]
+                        sort_opts = [c for c in sort_opts if c in df_to_show.columns]
+                        if not sort_opts:
+                            sort_opts = ["Kalite"] if "Kalite" in df_to_show.columns else list(df_to_show.columns[:1])
+                        _sort_idx = sort_opts.index("Odak Skoru") if "Odak Skoru" in sort_opts else 0
+                        scan_sort = st.selectbox(
+                            "Önce sırala",
+                            sort_opts,
+                            index=_sort_idx,
+                            key="scan_sort_col",
+                        )
+                    with r2:
+                        min_odak_f = st.number_input(
+                            "Min. odak",
+                            min_value=0, max_value=100, value=0,
+                            help="0 = filtre yok",
+                            key="min_odak_f",
+                        )
+                    with r3:
+                        min_kat_f = st.number_input(
+                            "Min. katman",
+                            min_value=0, max_value=8, value=0,
+                            key="min_kat_f",
+                        )
+                    with r4:
+                        pass
+
+                df_work = df_to_show.copy()
+                if min_odak_f > 0 and "Odak Skoru" in df_work.columns:
+                    df_work = df_work[df_work["Odak Skoru"] >= float(min_odak_f)]
+                if min_kat_f > 0 and "Toparlanma Katmanı" in df_work.columns:
+                    df_work = df_work[df_work["Toparlanma Katmanı"] >= int(min_kat_f)]
+
+                sort_key = scan_sort if scan_sort in df_work.columns else (
+                    "Kalite" if "Kalite" in df_work.columns else df_work.columns[0]
+                )
+                df_to_show = df_work.sort_values(by=sort_key, ascending=False).reset_index(drop=True)
+
+            cur_tf = tf_name if "tf_name" in locals() else st.session_state.get("last_scan_tf", "Gunluk")
             
             # Her durumda UI'ı render et, hatalar sekmesini içerecek
             render_ui_results(df_to_show, cur_tf, st.session_state.scan_errs)
-            
-            if not df_to_show.empty:
-                render_ai_assistant(df_to_show, st.session_state.get("or_key_input", ""))
         else:
-             st.info("Henüz tarama yapılmadı. 'Taramayı Başlat' butonuna tıklayarak en güncel verileri analiz edebilirsiniz.")
+            st.info("Tarama yapılmadı.")
 
     with main_tab2:
         render_backtest_tab()
+
+# Özet tablosunda gösterilecek sütunlar (uzun metinler ayrıca kısaltılır)
+SCAN_COMPACT_COLUMNS = (
+    "Hisse", "Sinyal", "Kalite", "Haber Duygu", "Anomali", "Kelly %", "AI Gerekçe", "Odak Skoru", "Dip Skor", "Dip Sinyalleri",
+    "Toparlanma Katmanı", "Toparlanma Skoru",
+    "Golden Cross Breakout", "Dusus Riski", "Guven", "Aksiyon", "Özel Durum", "Vade", "Skor",
+    "Takas Küme", "Takas Akıllı Küme", "POC Mesafe %", "Lead Sinyal", "Order Flow"
+)
+
+
+def filter_dip_candidates(df: pd.DataFrame) -> pd.DataFrame:
+    """Dip koşulları güçlü / dip anlatımı olanlar (AL şartı yok)."""
+    if df is None or df.empty or "Dip Skor" not in df.columns:
+        return pd.DataFrame()
+    oz = df["Özel Durum"].astype(str) if "Özel Durum" in df.columns else pd.Series("", index=df.index)
+    dip_txt = (
+        df["Dip Sinyalleri"].astype(str)
+        if "Dip Sinyalleri" in df.columns
+        else pd.Series("-", index=df.index)
+    )
+    mask = (df["Dip Skor"] >= float(DIP_SOFT_LIST_MIN)) | oz.str.contains("DİPTEN", na=False)
+    mask = mask | ((dip_txt != "-") & (dip_txt.str.len() > 2))
+    return df.loc[mask].copy()
+
+
+def filter_dip_buy_rows(df: pd.DataFrame) -> pd.DataFrame:
+    """AL sinyali + dip/dipten dönüş ile uyumlu aksiyon veya yüksek dip skoru."""
+    if df is None or df.empty or "Sinyal" not in df.columns:
+        return pd.DataFrame()
+    al = df["Sinyal"] == "AL"
+    dip_hi = (
+        df["Dip Skor"] >= float(DIP_SOLID_BOTTOM_MIN)
+        if "Dip Skor" in df.columns
+        else pd.Series(False, index=df.index)
+    )
+    aks = df["Aksiyon"].astype(str) if "Aksiyon" in df.columns else pd.Series("", index=df.index)
+    oz = df["Özel Durum"].astype(str) if "Özel Durum" in df.columns else pd.Series("", index=df.index)
+    mask = al & (
+        dip_hi | aks.str.contains("DİP", na=False) | oz.str.contains("DİPTEN DÖNÜYOR", na=False)
+    )
+    return df.loc[mask].copy()
+
+
+def _truncate_cell(val, max_len: int = 120) -> str:
+    if val is None:
+        return ""
+    try:
+        if isinstance(val, float) and np.isnan(val):
+            return ""
+    except Exception:
+        pass
+    s = str(val).replace("\n", " ").strip()
+    return s if len(s) <= max_len else s[: max_len - 1] + "…"
+
+
+def render_scan_table(
+    input_df: pd.DataFrame,
+    sort_col: str = "Kalite",
+    *,
+    compact: bool = True,
+    max_text: int = 120,
+):
+    if input_df.empty:
+        st.info("Sonuç yok.")
+        return
+
+    display_df = input_df.sort_values(by=sort_col, ascending=False).copy()
+    text_trim = {"Özel Durum", "Odak Özeti", "div_msg", "Dip Sinyalleri"}
+    lim = max_text if compact else max(max_text * 2, 200)
+    if compact:
+        cols = [c for c in SCAN_COMPACT_COLUMNS if c in display_df.columns]
+        if not cols:
+            cols = list(display_df.columns)
+        display_df = display_df[cols]
+    for c in text_trim:
+        if c in display_df.columns:
+            display_df[c] = display_df[c].map(lambda x: _truncate_cell(x, lim))
+
+    col_config = {
+        "Hisse": st.column_config.TextColumn("Hisse"),
+        "Vade": st.column_config.TextColumn("Vade"),
+        "Pozisyon": st.column_config.TextColumn("Poz. (x)"),
+        "Elite Skor": st.column_config.ProgressColumn("Elite", min_value=0, max_value=100),
+        "Kalite": st.column_config.ProgressColumn("Kalite", min_value=0, max_value=100),
+        "Sinyal": st.column_config.TextColumn("Sinyal"),
+        "Weinstein": st.column_config.TextColumn("Weinstein"),
+        "Trend Sablonu": st.column_config.TextColumn("Trend"),
+        "Aksiyon": st.column_config.TextColumn("Aksiyon"),
+        "pe_ratio": st.column_config.NumberColumn("F/K", format="%.2f"),
+        "pb_ratio": st.column_config.NumberColumn("PD/DD", format="%.2f"),
+        "isy_score": st.column_config.ProgressColumn("Temel", min_value=0, max_value=100),
+        "isy_grade": st.column_config.TextColumn("Temel not"),
+        "piotroski_score": st.column_config.ProgressColumn("F-Score", min_value=0, max_value=9),
+        "Takas Puani": st.column_config.ProgressColumn("Takas", min_value=0, max_value=100),
+        "Takas Karari": st.column_config.TextColumn("Takas kr."),
+        "Takas Küme": st.column_config.TextColumn("Takas km."),
+        "Takas Akıllı Küme": st.column_config.TextColumn("Akıllı küme"),
+        "has_bullish_div": st.column_config.CheckboxColumn("Uyumsuzluk"),
+        "div_msg": st.column_config.TextColumn("Uyumsuzluk notu"),
+        "Toparlanma Skoru": st.column_config.ProgressColumn("Top. skor", min_value=0, max_value=100),
+        "Toparlanma Katmanı": st.column_config.NumberColumn("Katman", format="%d"),
+        "Taze Katman": st.column_config.NumberColumn("Taze", format="%d"),
+        "Toparlanma Sinyali": st.column_config.TextColumn("Top. sinyal"),
+        "Odak Skoru": st.column_config.ProgressColumn("Odak", min_value=0, max_value=100),
+        "Odak Özeti": st.column_config.TextColumn("Odak özet"),
+        "Pullback Entry": st.column_config.TextColumn("Pullback"),
+        "EMA20 Mesafe %": st.column_config.NumberColumn("EMA20 %", format="%.2f"),
+        "Breakout Soon": st.column_config.TextColumn("Soon"),
+        "Patlama Skoru": st.column_config.ProgressColumn("Patlama", min_value=0, max_value=100),
+        "Direnç Mesafe %": st.column_config.NumberColumn("R20 %", format="%.2f"),
+        "Golden Cross Breakout": st.column_config.TextColumn("GC Breakout"),
+        "Golden Cross Skor": st.column_config.ProgressColumn("GC Skor", min_value=0, max_value=100),
+        "AI Gerekçe": st.column_config.TextColumn("🧠 AI Gerekçe"),
+        "Anomali": st.column_config.TextColumn("🛡️ Anomali"),
+        "Anomali Skor": st.column_config.NumberColumn("Risk P."),
+        "Kelly %": st.column_config.NumberColumn("Kelly %", format="%.2f"),
+        "Lead Sinyal": st.column_config.NumberColumn("Öncü", format="%.2f"),
+        "Order Flow": st.column_config.NumberColumn("Emir Akışı", format="%.2f"),
+        "POC Mesafe %": st.column_config.NumberColumn("POC %", format="%.2f"),
+        "Haber Duygu": st.column_config.NumberColumn("📰 Duygu", format="%.2f", help="NLP Duygu Analizi (-1: Negatif, +1: Pozitif)"),
+    }
+    cfg = {k: v for k, v in col_config.items() if k in display_df.columns}
+    style = display_df.style.map(signal_style, subset=["Sinyal"]) if "Sinyal" in display_df.columns else display_df.style
+    if "Aksiyon" in display_df.columns:
+        style = style.map(action_style, subset=["Aksiyon"])
+    st.dataframe(style, use_container_width=True, height=520, column_config=cfg)
+
 
 def render_ui_results(df, tf_name, errs=None):
     if df is None or df.empty:
@@ -193,12 +482,12 @@ def render_ui_results(df, tf_name, errs=None):
 
     tabs = st.tabs([
         "📅 Uzun Vade", "📅 Orta Vade", "📅 Kısa Vade", "💎 ELİT HİSSELER", 
-        "📊 Temel Analiz", "📈 Stan Weinstein", "🚀 Mark Minervini",
+        "🛡️ Risk & Getiri Eğrisi", "📊 Temel Analiz", "📈 Stan Weinstein", "🚀 Mark Minervini",
         "📉 Dip", "🚀 Breakout", "📈 Momentum", "💥 Hacim Patlaması", 
         "🗜️ Bollinger Sıkışması", "📐 Konsolidasyon", "❌ Hatalar & Loglar"
     ])
     
-    (tab_uzun, tab_orta, tab_kisa, tab_elite, tab_fundamental, tab_weinstein, tab_minervini, 
+    (tab_uzun, tab_orta, tab_kisa, tab_elite, tab_risk, tab_fundamental, tab_weinstein, tab_minervini, 
      tab2, tab3, tab4, tab5, tab6, tab7, tab_errs) = tabs
 
     with tab_uzun:
@@ -219,6 +508,41 @@ def render_ui_results(df, tf_name, errs=None):
             render_scan_table(elite_df, sort_col="Elite Skor")
         else:
             st.info("Elite veri yok.")
+    with tab_risk:
+        st.subheader("🛡️ Otonom Portföy Risk & Getiri Projeksiyonu")
+        st.caption("Monte Carlo Simülasyonu: Mevcut 'AL' sinyallerinin 30 günlük olası kazanç eğrileri.")
+        
+        al_sinyalleri = df[df["Sinyal"] == "AL"] if "Sinyal" in df.columns else pd.DataFrame()
+        if not al_sinyalleri.empty:
+            # Basit bir Monte Carlo simülasyonu
+            n_sims = 50
+            days = 30
+            # Getiri potansiyelini 'Kalite' ve 'Guven'den türet
+            avg_daily_ret = (al_sinyalleri["Kalite"].mean() / 1000.0)
+            volatility = 0.02 # %2 günlük volatilite varsayımı
+            
+            sim_data = []
+            for i in range(n_sims):
+                returns = np.random.normal(avg_daily_ret, volatility, days)
+                equity_curve = np.cumprod(1 + returns)
+                sim_data.append(equity_curve)
+                
+            sim_df = pd.DataFrame(np.array(sim_data).T)
+            fig = px.line(sim_df, labels={"index": "Gün", "value": "Sermaye Katsayısı"}, 
+                         title="30 Günlük Sermaye Eğrisi Projeksiyonu")
+            fig.update_layout(showlegend=False, template="plotly_dark")
+            st.plotly_chart(fig, use_container_width=True)
+            
+            # Risk Metrikleri
+            r_col1, r_col2 = st.columns(2)
+            max_drawdown = (1 - sim_df.min().min()) * 100
+            final_ret = (sim_df.iloc[-1].mean() - 1) * 100
+            r_col1.metric("Tahmini 30 Günlük Getiri", f"%{final_ret:.1f}")
+            r_col2.metric("Olası Maksimum Düşüş (DD)", f"%{max_drawdown:.1f}")
+            
+            st.warning("⚠️ **NOT:** Bu simülasyon mevcut sinyallerin istatistiksel dağılımı üzerinden üretilen teorik bir tahmindir. Kesin kâr vaat etmez.")
+        else:
+            st.info("Simülasyon için henüz 'AL' sinyali bulunamadı.")
     
     with tab_fundamental:
         st.subheader("Temel Analiz (Haftalık İş Yatırım Taraması Verileri)")
@@ -231,20 +555,20 @@ def render_ui_results(df, tf_name, errs=None):
     with tab_weinstein:
         st.subheader("Stan Weinstein - Aşama Analizi")
         st.caption("Fiyatın 30 haftalık SMA üzerinde olduğu ve SMA'nın yukarı döndüğü (Aşama 2) hisseler.")
-        weinstein_df = df[df["Weinstein"] == "Aşama 2"].copy()
+        weinstein_df = df[df["Weinstein"] == "Aşama 2"].copy() if "Weinstein" in df.columns else pd.DataFrame()
         render_scan_table(weinstein_df, sort_col="Kalite")
         
     with tab_minervini:
         st.subheader("Mark Minervini - Trend Template")
         st.caption("Aşama 2 trendinde olan, SMA 50 > 150 > 200 dizilimini sağlayan kurumsal trend adayları.")
-        minervini_df = df[df["Trend Sablonu"] == "✅ GÜÇLÜ (MINERVINI)"].copy()
+        minervini_df = df[df["Trend Sablonu"] == "✅ GÜÇLÜ (MINERVINI)"].copy() if "Trend Sablonu" in df.columns else pd.DataFrame()
         render_scan_table(minervini_df, sort_col="Kalite")
     with tab2: render_scan_table(df, sort_col="Dip Skor")
     with tab3: render_scan_table(df, sort_col="Breakout Skor")
     with tab4: render_scan_table(df, sort_col="Momentum Skor")
-    with tab5: render_scan_table(df[df["Hacim Spike"] >= 2.0], sort_col="Hacim Spike")
-    with tab6: render_scan_table(df[df["Daralma (Squeeze)"] == "🗜 İzlenir"], sort_col="Bollinger Genisligi")
-    with tab7: render_scan_table(df, sort_col="Konsol Skor")
+    with tab5: render_scan_table(df[df["Hacim Spike"] >= 2.0] if "Hacim Spike" in df.columns else pd.DataFrame(), sort_col="Hacim Spike" if "Hacim Spike" in df.columns else "Kalite")
+    with tab6: render_scan_table(df[df["Daralma (Squeeze)"] == "🗜 İzlenir"] if "Daralma (Squeeze)" in df.columns else pd.DataFrame(), sort_col="Bollinger Genisligi" if "Bollinger Genisligi" in df.columns else "Kalite")
+    with tab7: render_scan_table(df, sort_col="Konsol Skor" if "Konsol Skor" in df.columns else "Kalite")
     
     with tab_errs:
         st.subheader("⚠️ Tarama Sırasında Oluşan Hatalar")
@@ -260,7 +584,7 @@ def render_ui_results(df, tf_name, errs=None):
     with res_col1:
         st.subheader("🏢 Takas & AKD Detaylı İzleyici")
         st.caption("En iyi 10 'AL' sinyalinin kurumsal takas verilerini buradan kontrol edebilirsiniz.")
-        al_hisseler = df[df["Sinyal"] == "AL"].head(10)
+        al_hisseler = df[df["Sinyal"] == "AL"].head(10) if "Sinyal" in df.columns else pd.DataFrame()
         if not al_hisseler.empty:
             for _, row in al_hisseler.iterrows():
                 with st.expander(f"📌 {row['Hisse']} Takas Verisi"):
@@ -275,14 +599,16 @@ def render_ui_results(df, tf_name, errs=None):
     # Korelasyon ve Sektör Analizi (Alt Bölüm)
     render_correlation_analysis(df, st.session_state.piyasa, tf_name)
 
+
 def render_ai_assistant(df: pd.DataFrame, api_key: str):
-    st.markdown("---")
-    st.subheader("🤖 Yapay Zeka Veri Asistanı")
-    st.caption("Ekranda listelenen hisse verilerine dayanarak AI'dan puanlama, özetleme veya en iyi fırsatları bulmasını isteyebilirsiniz.")
-    
-    question = st.text_input("Tarama verileriyle ilgili ne öğrenmek istersiniz?", placeholder="Örn: En düşük düşüş riskine sahip ve kalitesi 60'ın üzerinde olan ilk 3 hisseyi benim için açıkla.")
-    
-    if st.button("Soruyu Sor", type="primary"):
+    st.subheader("AI asistan")
+    question = st.text_input(
+        "Soru",
+        placeholder="Örn: Düşüş riski düşük ilk 3 hisse?",
+        key="ai_q",
+    )
+
+    if st.button("Gönder", type="primary", key="ai_send"):
         if not api_key:
             st.error("Bu özelliği kullanmak için soldaki menüden OpenRouter API anahtarını girmelisiniz.")
             return
@@ -314,17 +640,19 @@ def render_ai_assistant(df: pd.DataFrame, api_key: str):
                 )
                 
                 ai_text = response.choices[0].message.content.strip()
-                st.info(f"**Cevap:**\n\n{ai_text}")
+                st.markdown(ai_text)
             except Exception as e:
                 st.error(f"Yapay zeka ile bağlantı kurulurken bir hata oluştu: {e}")
 
-def render_correlation_analysis(df, exchange, tf_name):
-    st.markdown("---")
-    st.subheader("🧩 Sepet & Karar Analizi")
-    st.info("Portföyünüzün risk dağılımını ve hisseler arasındaki hareket benzerliğini analiz edin.")
-    
-    # 1. Korelasyon Matrisi
-    st.write("📊 **Fiyat Hareket Benzerliği (Son 60 Gün)**")
+def render_correlation_analysis(df, exchange, tf_name, embedded=False):
+    if not embedded:
+        st.markdown("---")
+        st.subheader("Sepet analizi")
+        st.caption("Üst 10 kalite hisse, son 60 bar.")
+    else:
+        st.caption("Üst 10 kalite hisse · 60 bar")
+
+    st.write("**Korelasyon (60 gün)**")
     
     if df.empty:
         st.warning("Analiz için veri bulunamadı.")
@@ -338,7 +666,8 @@ def render_correlation_analysis(df, exchange, tf_name):
         st.warning("Korelasyon analizi için en az 2 hisse gereklidir.")
         return
 
-    if st.button("🧩 Korelasyon Analizini Başlat"):
+    btn_key = "corr_btn_embed" if embedded else "corr_btn"
+    if st.button("Korelasyonu hesapla", key=btn_key):
         from tvDatafeed import TvDatafeed
         tv = TvDatafeed()
         tf = TIMEFRAME_OPTIONS[tf_name]
@@ -372,12 +701,11 @@ def render_correlation_analysis(df, exchange, tf_name):
                         title="Hisseler Arası Hareket Benzerliği (-1 ile 1 arası)")
         st.plotly_chart(fig, use_container_width=True)
         
-        st.caption("💡 0.70 üzerindeki dege rler yüksek benzerlik gösterir. Riski dağıtmak için farklı sektörlerden ve düşük korelasyonlu hisseler seçmelisiniz.")
-    
+        st.caption("0.70 üzeri yüksek benzerlik; farklı sektörlerle riski dağıtın.")
+
     # 2. Sektör Dağılımı (Sadece BIST için)
     if exchange == "BIST" and not df.empty:
-        st.markdown("---")
-        st.write("🏢 **Sektör Yoğunlaşması (Top 15)**")
+        st.write("**Sektör (ilk 15 satır)**")
         top_15 = df.head(15)["Hisse"].tolist()
         sectors = [BIST_SECTORS.get(s, "Diğer") for s in top_15]
         sec_counts = pd.Series(sectors).value_counts()
@@ -385,43 +713,14 @@ def render_correlation_analysis(df, exchange, tf_name):
         fig_sec = px.pie(values=sec_counts.values, names=sec_counts.index, title="Sepetteki Sektör Dağılımı")
         st.plotly_chart(fig_sec, use_container_width=True)
 
-def render_scan_table(input_df, sort_col="Kalite"):
-    if input_df.empty:
-        st.info("Sonuç yok.")
-        return
-    col_config = {
-        "Hisse": st.column_config.TextColumn("📊 Hisse"),
-        "Vade": st.column_config.TextColumn("⏳ Vade"),
-        "Pozisyon": st.column_config.TextColumn("💰 Poz. Büyüklüğü (x)"),
-        "Elite Skor": st.column_config.ProgressColumn("💎 Elite", min_value=0, max_value=100),
-        "Kalite": st.column_config.ProgressColumn("⭐ Kalite", min_value=0, max_value=100),
-        "Sinyal": st.column_config.TextColumn("📡 Sinyal"),
-        "Weinstein": st.column_config.TextColumn("📈 Weinstein"),
-        "Trend Sablonu": st.column_config.TextColumn("🚀 Trend Şablonu"),
-        "Aksiyon": st.column_config.TextColumn("🎯 Aksiyon Planı"),
-        "pe_ratio": st.column_config.NumberColumn("💰 F/K", format="%.2f"),
-        "pb_ratio": st.column_config.NumberColumn("🏢 PD/DD", format="%.2f"),
-        "isy_score": st.column_config.ProgressColumn("💎 Temel Puan", min_value=0, max_value=100),
-        "isy_grade": st.column_config.TextColumn("📜 Temel Not"),
-        "piotroski_score": st.column_config.ProgressColumn("📊 F-Score", min_value=0, max_value=9),
-        "Takas Puani": st.column_config.ProgressColumn("🏢 Takas Puanı", min_value=0, max_value=100),
-        "Takas Karari": st.column_config.TextColumn("🔍 Takas Kararı"),
-        "has_bullish_div": st.column_config.CheckboxColumn("🐂 Boğa Uyumsuzluğu"),
-        "div_msg": st.column_config.TextColumn("Uyumsuzluk Notu"),
-    }
-    display_df = input_df.sort_values(by=sort_col, ascending=False)
-    st.dataframe(
-        display_df.style.map(signal_style, subset=["Sinyal"]).map(action_style, subset=["Aksiyon"]),
-        use_container_width=True, height=600, column_config=col_config
-    )
 
 def run_scan(symbols, exchange, tf_name, delay_ms, workers=1):
     from tvDatafeed import TvDatafeed
     from divergence import DivergenceEngine
     from data_fetcher import get_cached_index_history
-    
+
     tv = TvDatafeed()
-    div_engine = DivergenceEngine()
+    div_engine = DivergenceEngine()  # tüm worker çağrılarında yeniden kullan (durumsuz motor)
     tf = TIMEFRAME_OPTIONS[tf_name]
     ai_model, ai_features = get_ai_model(exchange, tf_name, _tv=tv)
     index_healthy = check_index_health(tv, exchange, tf_name)
@@ -439,8 +738,8 @@ def run_scan(symbols, exchange, tf_name, delay_ms, workers=1):
         from streamlit.runtime.scriptrunner import get_script_run_ctx
         if get_script_run_ctx() is not None:
             is_gui = True
-    except:
-        pass
+    except Exception:
+        is_gui = False
 
     if is_gui:
         p = st.progress(0)
@@ -450,24 +749,23 @@ def run_scan(symbols, exchange, tf_name, delay_ms, workers=1):
 
     def scan_one(sym, worker_id=0):
         try:
-            if delay_ms > 0:
-                time.sleep((delay_ms / 1000.0) + (worker_id * 0.1))
-            base_raw = fetch_hist(tv, sym, tv_exchange, interval_obj(tf["base"]), tf["bars"])
-            conf_raw = fetch_hist(tv, sym, tv_exchange, interval_obj(tf["confirm"]), tf["confirm_bars"])
-            base, conf = add_indicators(base_raw, index_df=global_index_df), add_indicators(conf_raw)
-            vb = base.dropna(subset=["close", "rsi", "adx"])
-            vc = conf.dropna(subset=["close", "macd_hist"])
-            if vb.empty or vc.empty: return {"_err": f"{sym}: Veri yok"}
+            prep = prepare_symbol_dataframes(
+                tv, sym, tv_exchange, tf,
+                global_index_df=global_index_df,
+                delay_ms=delay_ms,
+                worker_id=worker_id,
+            )
+            if not prep.get("ok"):
+                return {"_err": prep.get("error", f"{sym}: hazırlık hatası")}
 
-            # Divergence Analysis
-            candles = base_raw[["open", "high", "low", "close", "volume"]].dropna().to_dict("records")
-            div_res_data = div_engine.analyze(candles)
-            has_bullish_div = (div_res_data["summary"]["bias"] == "bullish")
-            div_msg = div_res_data["summary"].get("ai_hint", "")
+            base_raw = prep["base_raw"]
+            vb = prep["vb"]
+            vc = prep["vc"]
 
             last, prev, conf_last = vb.iloc[-1].copy(), vb.iloc[-2] if len(vb)>1 else vb.iloc[-1].copy(), vc.iloc[-1]
-            last["has_bullish_div"] = has_bullish_div
-            last["div_msg"] = div_msg
+            div_res_data = attach_divergence_to_last(last, base_raw, engine=div_engine)
+            has_bullish_div = bool(last.get("has_bullish_div", False))
+            div_msg = str(last.get("div_msg", "") or "")
             
             # --- SİNYAL TAKİBİ (Faz 4) ---
             # Geriye dönük tarama yapabilmek için vb'yi kullanıyoruz
@@ -482,7 +780,9 @@ def run_scan(symbols, exchange, tf_name, delay_ms, workers=1):
                 if 0 <= idx < len(vb):
                     raw_idx = vb.index[idx]
                     if raw_idx in recent_vb.index:
-                        if sig.get("divergence_type") in ["positive_regular", "positive_hidden"]:
+                        if sig.get("divergence_type") in [
+                            "positive_regular", "positive_hidden", "rsi_bullish_reversal",
+                        ]:
                             recent_vb.at[raw_idx, "has_div"] = True
                             
             # Sinyal türlerini tespit et (Ultimate, UT Bot, Div)
@@ -550,7 +850,14 @@ def run_scan(symbols, exchange, tf_name, delay_ms, workers=1):
                 "Takas Karari": s.get("Takas Karari", "-"),
                 "Sinyal Fiyatı": sig_price if sig_price else "-",
                 "Sinyal Mesafesi": f"%{round(dist_pct, 1)}" if sig_price else "-",
-                "Sinyal Zamanı": f"{sig_bars} bar önce" if sig_price else "-"
+                "Sinyal Zamanı": f"{sig_bars} bar önce" if sig_price else "-",
+                "Anomali": s.get("Anomali", "NORMAL"),
+                "Anomali Skor": s.get("Anomali Skor", 0.0),
+                "Kelly %": s.get("Kelly %", 0.0),
+                "Lead Sinyal": s.get("Lead Sinyal", 0.0),
+                "Order Flow": s.get("Order Flow", 0.0),
+                "Haber Duygu": float(_safe_get(last, "feat_sentiment", 0.0)),
+                "RL Aksiyon": s.get("RL Aksiyon", "-")
             }
             if targets: res.update(targets)
             
@@ -586,7 +893,17 @@ def run_scan(symbols, exchange, tf_name, delay_ms, workers=1):
                         "piotroski_score": fund.get("piotroski_score", 0),
                         "isy_score": fund.get("isy_score", 0),
                     })
-                
+                if exchange == "BIST":
+                    try:
+                        from takas_cluster_db import get_latest_cluster_for_symbol
+
+                        _cr = get_latest_cluster_for_symbol(sym, "kmeans")
+                        if _cr:
+                            feat_log["takas_cluster_id"] = int(_cr["cluster_id"])
+                            feat_log["takas_smart_cluster"] = int(bool(_cr["is_smart_cluster"]))
+                    except Exception:
+                        pass
+
                 try:
                     log_signal(sym, exchange, float(last["close"]), s.get("Sinyal"), feat_log, market_context=m_ctx)
                 except Exception as e:
@@ -610,10 +927,13 @@ def run_scan(symbols, exchange, tf_name, delay_ms, workers=1):
     df = pd.DataFrame(rows)
     if not df.empty:
         df = df.sort_values(by="Kalite", ascending=False).reset_index(drop=True)
-        # Sadece AL sinyali verenler veya Kalite puanı yüksek olanlar için temel analiz yap (Hız için limitli)
-        to_check = df[df["Sinyal"] == "AL"].index.tolist()
-        if len(to_check) < 3: # Eğer hiç AL yoksa en iyi 3 kaliteyi kontrol et
-            to_check = df.head(3).index.tolist()
+        # AL + yüksek Odak Skoru (dipten/yatay dönüş adayları) için temel analiz — sadece AL değil
+        al_ix = df[df["Sinyal"] == "AL"].index.tolist()
+        odak_ix = df[df["Odak Skoru"] >= 32].index.tolist() if "Odak Skoru" in df.columns else []
+        merged = list(dict.fromkeys(al_ix + odak_ix))
+        to_check = merged if merged else df.head(3).index.tolist()
+        if len(to_check) < 3:
+            to_check = list(dict.fromkeys(to_check + df.head(3).index.tolist()))
             
         for idx in to_check[:15]: # Maksimum 15 hisse için temel veri çek (Rate limit koruması)
             sym = df.loc[idx, "Hisse"]
@@ -720,6 +1040,18 @@ def render_backtest_tab():
                             return f'background-color: {color}'
                         except: return ''
                         
+                    # Market Rejimi Özeti (YENİ)
+                    if not res_df.empty:
+                        regime = str(res_df["market_regime"].iloc[0]) if "market_regime" in res_df.columns else "MIXED"
+                        regime_msg = {
+                            "TREND": "🚀 GÜÇLÜ TREND ÇIKIŞI (Momentum Odaklı)",
+                            "ACCUMULATION": "🗜️ SIKIŞMA / BİRİKİM (Patlama Bekleniyor)",
+                            "BEAR": "🐻 AYI PİYASASI (Savunma Modu Aktif)",
+                            "MIXED": "🌀 KARMA / NÖTR PİYASA"
+                        }.get(regime, "🌀 KARMA PİYASA")
+                        
+                        st.info(f"🌐 **MEVCUT PİYASA REJİMİ:** {regime_msg}")
+
                     st.dataframe(
                         res_df.style.map(color_cells, subset=["Kapanış Getirisi (%)", "Maksimum Potansiyel (%)"]),
                         use_container_width=True

@@ -13,8 +13,8 @@ SCAN_POLICY_PATH = "scanner_policy.json"
 def get_scanner_policy() -> Dict:
     """Robotun kendi kendine belirleyeceği optimize tarama stratejisini yükler."""
     default_policy = {
-        "elite_threshold": 75.0,
-        "trade_ready_threshold": 60.0,
+        "elite_threshold": 88.5,
+        "trade_ready_threshold": 66.4,
         "weights": {
             "trend": 0.25,
             "dip": 0.15,
@@ -109,8 +109,8 @@ def query_experience_memory(current_row, feature_list):
         with open(path, "rb") as f:
             mem = pickle.load(f)
         
-        # Mevcut özellikleri al ve eksik değerleri temizle (FutureWarning fix)
-        current_feats = current_row[feature_list].fillna(0).infer_objects(copy=False).values.reshape(1, -1)
+        # Mevcut özellikleri al ve eksik değerleri temizle
+        current_feats = current_row[feature_list].fillna(0).values.reshape(1, -1)
         mem_feats = mem['features'][feature_list].fillna(0).values
         mem_targets = mem['targets']
         
@@ -283,8 +283,13 @@ def calculate_elite_score(technical: Dict, fundamental: Dict) -> Dict[str, objec
         elite_reasons.append("📉 Güçlü Borç Azaltımı")
     
     elite_penalty = 0
-    if pe is not None and pe < 0:
-        elite_penalty += 15
+    if pe is not None:
+        if pe < 0:
+            elite_penalty += 40
+            elite_reasons.append("⚠️ NEGATİF FK (Zarar)")
+        elif pe > 60:
+            elite_penalty += 40
+            elite_reasons.append("⚠️ AŞIRI YÜKSEK FK (Balon Riski)")
     if de is not None and de > 2.0:
         elite_penalty += 10
     if rg is not None and rg < -0.10:
@@ -423,20 +428,11 @@ def score_symbol(last: pd.Series, prev: pd.Series, conf_last: pd.Series, market:
     is_near_bottom = (support_120_val > 0) and (((close_val - support_120_val) / support_120_val) * 100 <= 5.0)
     is_volume_up = (vol_spike_val >= 1.3)
 
-    # --- Stochastic RSI Dönüşü (YENİ) ---
-    stoch_k = float(_safe_get(last, "stoch_k", 50.0))
-    stoch_d = float(_safe_get(last, "stoch_d", 50.0))
-    prev_stoch_k = float(_safe_get(prev, "stoch_k", 50.0))
-    prev_stoch_d = float(_safe_get(prev, "stoch_d", 50.0))
-    
-    stoch_oversold_cross = (stoch_k < 25) and (stoch_k > stoch_d) and (prev_stoch_k <= prev_stoch_d)
-
     dip = 0.0
     dip_signals = []
     
     dip += 25 if is_rsi_oversold else 0
     dip += 15 if is_rsi_rising else 0
-    dip += 30 if stoch_oversold_cross else 0 # StochRSI Golden Cross Bonusu
     dip += 20 if macd_cross_up else 0
     dip += 15 if _safe_get(last, "pos_div", False) else 0
     dip += 15 if is_price_above_ma20 else 0
@@ -461,7 +457,6 @@ def score_symbol(last: pd.Series, prev: pd.Series, conf_last: pd.Series, market:
     
     if is_rsi_oversold: dip_signals.append("✓ RSI Aşırı Satım")
     if is_rsi_rising: dip_signals.append("✓ RSI Dönüşü")
-    if stoch_oversold_cross: dip_signals.append("✓ StochRSI Dip Kesişimi")
     if macd_cross_up: dip_signals.append("✓ MACD Kesti")
     if is_price_above_ma20: dip_signals.append("✓ MA20 Kırıldı")
     if is_near_bottom: dip_signals.append("✓ Destek Bölgesi")
@@ -745,8 +740,37 @@ def score_symbol(last: pd.Series, prev: pd.Series, conf_last: pd.Series, market:
 
     kalite = clamp(kalite)
 
+    # --- 🛡️ BÜYÜK FİNANS MODELİ (LFM) GÜVENLİK KALKANLARI ---
+    kill_switch_active = False
+    durumlar = overextend_reasons 
+    vol_ma20_val = float(_safe_get(last, "volume_ma20", 0.0))
+    ai_prob_raw = float(_safe_get(last, "ai_prob", 0.0)) # Geçici, asıl veri fit'ten gelir
+    
+    # 1. SLIPPAGE VE KOMİSYON CEZASI (Gerçek Hayat Simülasyonu)
+    # Hacmi sığ olan hisseler kağıt üzerinde kârlı görünse de gerçekte alınamaz. İptal Et.
+    if not is_liquid or (vol_ma20_val * close_val < 5000000 and market == "BIST"):
+        kalite -= 25 # Ciddi Slippage Cezası
+        durumlar.append("🚫 SIĞ TAHTA (SLIPPAGE/KOMİSYON RİSKİ)")
+        
+    # 2. ANTI-OVERFIT (Aşırı Öğrenme/Ezber Koruması)
+    # Eğer model çok emin (AI>80) fakat ana trend tamamen ters yöndeyse (SMA200 altı), model ezbere bağlamış olabilir.
+    if ai_prob_raw > 80.0 and (close_val < sma200_val) and (daily_return < -3.0):
+        kalite *= 0.5 # Güveni yarı yarıya kes
+        durumlar.append("🛡️ ANTI-OVERFIT: Ayı Piyasasında Aşırı Güven (Törpülendi)")
+
+    # 3. KILL-SWITCH (Acil Durum Şalteri)
+    # VIX (Oynaklık) veya Endeks genel çöküşündeyken sistem kendini kilitler.
+    # Şimdilik Endeks genel sağlığı üzerinden tetikleniyor.
+    if not index_healthy and atr_pct_val > 10.0 and daily_return < -5.0:
+        kill_switch_active = True
+        durumlar.append("🛑 KILL-SWITCH AKTİF: Sistematik Çöküş Riski")
+
+    kalite = clamp(kalite)
+
     # KARARLAR
-    if is_exhaustion or rsi_val > 85:
+    if kill_switch_active:
+        decision, signal, action = "NO TRADE", "SAT", "🛑 KILL-SWITCH (İŞLEMLER KİLİTLİ)"
+    elif is_exhaustion or rsi_val > 85:
         decision, signal, action = "TAKE PROFIT", "SAT", "🚨 EXTREME SATIŞ BÖLGESİ"
     elif w_score <= -40 and ema20_slope < 0:
         # Şort (Aşağı Yönlü) Tarama Modülü - Aşama 4 Çöküşü
@@ -851,7 +875,7 @@ def score_symbol(last: pd.Series, prev: pd.Series, conf_last: pd.Series, market:
     # Modelin 'features' listesini bul (genelde indicators'da tanımlı olanlar)
     feature_list = [
         "rsi", "macd_hist", "adx", "atr_pct", "bb_width", "roc20", 
-        "ema20_slope", "vol_spike", "feat_rsi_mom", "feat_vol_atr"
+        "ema20_slope", "vol_spike", "feat_rsi_mom", "feat_vol_atr", "feat_trend_strength"
     ]
     # Sadece mevcut olanları filtrele
     valid_features = [f for f in feature_list if f in last.index]
@@ -1080,11 +1104,30 @@ def score_symbol(last: pd.Series, prev: pd.Series, conf_last: pd.Series, market:
         decision, signal = "HIGH CONVICTION", "AL"
     elif kalite < ready_t and signal == "AL":
         decision, signal = "WATCHLIST", "BEKLE"
+    # --- 10. AI KARAR GEREKÇESİ (SHAP Summary) ---
+    ai_explanation = "-"
+    if _BAYESIAN_OK:
+        try:
+            # Model dosyası içindeki SHAP explainer'ı kullan
+            with open("ai_model.pkl", "rb") as f:
+                exp = pickle.load(f)
+                explainer = exp.get('shap_explainer')
+                if explainer:
+                    # Gerekli özellikleri modele uygun formatta çek
+                    feat_names = exp.get('features', [])
+                    if feat_names:
+                        X_row = last[feat_names].fillna(0)
+                        # Student veya ana pipeline hangisi varsa kullan
+                        model = exp.get('student') or list(exp.get('experts', {}).values())[0]
+                        ai_explanation = explainer.explain_prediction(model, X_row)
+        except Exception:
+            pass
 
     return {
         "Vade": vade, "Kalite": round(kalite, 1), "Günlük %": f"%{round(daily_return, 2)}",
         "Pozisyon": pos_label,
         "Kelly %": pos_result.get("size_pct", 0.0),
+        "AI Gerekçe": ai_explanation,
         "KAP Skor": round(sentiment_data.get("composite", 0.0), 2),
         "Haber Tansiyonu": sentiment_data.get("news_volume", 0),
         "Lead Sinyal": round(leading_signal, 2),
@@ -1124,6 +1167,7 @@ def score_symbol(last: pd.Series, prev: pd.Series, conf_last: pd.Series, market:
         "Daralma (Squeeze)": "🗜 İzlenir" if bb_squeeze else "-",
         "Elite Skor": 0  # run_scan'de temel analiz ile güncellenir
     }
+
 
 def score_weinstein(last: pd.Series, conf_last: pd.Series) -> Tuple[float, str, str]:
     """Stan Weinstein Stage Analysis (Aşama Analizi) Skorlaması.
