@@ -13,6 +13,15 @@ TR_TZ = pytz.timezone("Europe/Istanbul")
 from dotenv import load_dotenv
 load_dotenv()
 
+try:
+    from trainer_service import ShapExplainer
+    import __main__
+    setattr(__main__, 'ShapExplainer', ShapExplainer)
+except:
+    class ShapExplainer: pass
+    import __main__
+    setattr(__main__, 'ShapExplainer', ShapExplainer)
+
 # GitHub Secrets'ten okuyacağız, veya varsayılanları kullanacağız.
 # Güvenlik uyarısı: Hardcoded tokenlar kaldırıldı. GitHub Secrets üzerinden yönetilmelidir.
 # GitHub Secrets'ten okuyoruz.
@@ -221,16 +230,16 @@ if __name__ == "__main__":
             end_time = datetime.now(TR_TZ)
             duration = (end_time - start_time).total_seconds()
             
-            if not df.empty:
+            if not df.empty and (df["Sinyal"] == "AL").any():
                 message = format_telegram_message(MARKET, df, status)
                 # Başarılı ise AI yorumu ekle
                 ai_msg = get_ai_commentary(MARKET, df)
                 if ai_msg:
                     message += f"\n\n🤖 *AI ANALİZİ:*\n{ai_msg}"
+                send_msg(message)
+                print(f"[{datetime.now(TR_TZ)}] ✅ Sinyal bildirimi Telegram'a gönderildi.")
             else:
-                message = f"🛑 *{MARKET} Tarama Başarısız*\n{len(errs)} denemeden sonra veri alınamadı. GitHub IP engeli veya veri sağlayıcı hatası mevcut."
-            
-            send_msg(message)
+                print(f"[{datetime.now(TR_TZ)}] ℹ️ Sinyal oluşmadığı veya AL sinyali bulunmadığı için Telegram bildirimi atlanıyor.")
             print(f"[{datetime.now(TR_TZ)}] İşlem Tamamlandı.")
             os._exit(0)
         except Exception as e:

@@ -15,15 +15,17 @@ load_dotenv()
 try:
     from streamlit_app import run_scan
     from constants import DEFAULT_BIST_HISSELER, DEFAULT_NASDAQ_HISSELER, DEFAULT_CRYPTO_SYMBOLS, TIMEFRAME_OPTIONS
-    from data_fetcher import get_ai_model, check_index_health, interval_obj, fetch_hist
-    from indicators import add_indicators, calculate_price_targets
+    from data_fetcher import get_ai_model, check_index_health, get_cached_index_history
+    from indicators import calculate_price_targets
     from scoring import score_symbol
     from reporting import format_telegram_message
     from utils import _safe_get, send_telegram_message
     from db_manager import save_scan_results
     from tvDatafeed import TvDatafeed
+    from scan_pipeline import prepare_symbol_dataframes, attach_divergence_to_last
 except ImportError:
-    pass # hata almamak için
+    import logging
+    logging.getLogger(__name__).exception("server: gerekli modüller yüklenemedi")
 
 app = FastAPI(title="Gelişmiş Hisse Tarayıcı API")
 
@@ -70,20 +72,23 @@ async def run_scan_api(
     tf = TIMEFRAME_OPTIONS[tf_name]
     ai_model, ai_features = get_ai_model(exchange, tf_name, _tv=tv)
     index_healthy = check_index_health(tv, exchange, tf_name)
+    global_index_df = get_cached_index_history(exchange, tf_name, bars=tf["bars"])
     tv_exchange = "BINANCE" if exchange == "CRYPTO" else exchange
 
     def scan_one(sym, worker_id=0):
         try:
-            if delay_ms > 0:
-                time.sleep((delay_ms / 1000.0) + (worker_id * 0.1))
-            base_raw = fetch_hist(tv, sym, tv_exchange, interval_obj(tf["base"]), tf["bars"])
-            conf_raw = fetch_hist(tv, sym, tv_exchange, interval_obj(tf["confirm"]), tf["confirm_bars"])
-            base, conf = add_indicators(base_raw), add_indicators(conf_raw)
-            vb = base.dropna(subset=["close", "rsi", "adx"])
-            vc = conf.dropna(subset=["close", "macd_hist"])
-            if vb.empty or vc.empty: return {"_err": f"{sym}: Veri yok"}
-
-            last, prev, conf_last = vb.iloc[-1], vb.iloc[-2] if len(vb)>1 else vb.iloc[-1], vc.iloc[-1]
+            prep = prepare_symbol_dataframes(
+                tv, sym, tv_exchange, tf,
+                global_index_df=global_index_df,
+                delay_ms=delay_ms,
+                worker_id=worker_id,
+            )
+            if not prep.get("ok"):
+                return {"_err": prep.get("error", f"{sym}: hazırlık hatası")}
+            vb = prep["vb"]
+            vc = prep["vc"]
+            last, prev, conf_last = prep["last"], prep["prev"], prep["conf_last"]
+            attach_divergence_to_last(last, prep["base_raw"])
             s = score_symbol(last, prev, conf_last, exchange, index_healthy)
             targets = calculate_price_targets(vb)
             
@@ -135,13 +140,13 @@ async def run_scan_api(
             except Exception as e:
                 print(f"DB Kayıt Hatası: {e}")
 
-            if os.environ.get("TELEGRAM_BOT_TOKEN") and os.environ.get("TELEGRAM_CHAT_ID"):
+            bot_token = os.environ.get("TELEGRAM_BOT_TOKEN")
+            chat_id = os.environ.get("TELEGRAM_CHAT_ID")
+            if bot_token and chat_id:
                 buy_signals = df[df.get("Sinyal", "") == "AL"]
                 if not buy_signals.empty:
                     try:
                         msg = format_telegram_message(exchange, df, "OPEN")
-                        bot_token = os.environ.get("TELEGRAM_BOT_TOKEN", "8336526803:AAEvg9b0P9Em5MSND9uCb9RfbTGXBHDGdAA")
-                        chat_id = os.environ.get("TELEGRAM_CHAT_ID", "1070470722")
                         send_telegram_message(bot_token, chat_id, msg)
                     except Exception as e:
                         print(f"Telegram error: {e}")
@@ -186,4 +191,13 @@ async def ai_chat_api(req: AIRequest):
         return {"error": str(e)}
 
 if __name__ == "__main__":
-    uvicorn.run("server:app", host="0.0.0.0", port=8000, reload=True)
+    try:
+        from self_updater import start_autoupdater
+        # 3600 saniye (1 saat) aralıklarla github'ı kontrol etmeye başla
+        start_autoupdater(interval=3600)
+    except Exception as e:
+        print(f"AutoUpdater başlatılamadı: {e}")
+
+    # uvicorn.run("server:app", host="0.0.0.0", port=8000, reload=True)
+    # Production modu: Kendi os.execv tabanlı updater'ımıza güvendiğimiz için reload=False yapıyoruz
+    uvicorn.run("server:app", host="0.0.0.0", port=8000, reload=False)

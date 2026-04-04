@@ -10,12 +10,14 @@ import threading
 # Ana modelden gerekli verileri al
 from streamlit_app import run_scan
 from constants import DEFAULT_BIST_HISSELER, DEFAULT_NASDAQ_HISSELER, DEFAULT_CRYPTO_SYMBOLS, TIMEFRAME_OPTIONS
-from indicators import add_indicators, calculate_price_targets
+from indicators import calculate_price_targets
 from scoring import score_symbol
-from data_fetcher import fetch_hist, interval_obj
+from data_fetcher import get_cached_index_history, check_index_health
+from scan_pipeline import prepare_symbol_dataframes
 from utils import _safe_get
+from reporting import format_telegram_message
 
-TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "8336526803:AAEvg9b0P9Em5MSND9uCb9RfbTGXBHDGdAA")
+TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
 # Birden fazla chat_id destekle (Hem kendi hesabın hem de kanalın)
 ALLOWED_CHAT_IDS = ["1070470722", "-1003824371023"]
 DATA_FILE = "latest_scan_results.json"
@@ -27,6 +29,8 @@ REPO_NAME = "Kantitatif-Fon-Bot"
 WORKFLOW_ID = "daily_screener.yml" 
 
 def send_msg(chat_id, text, reply_markup=None):
+    if not TOKEN:
+        return
     url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
     # Önce Markdown ile dene, hata alırsa düz metne dön (alt tire vb. karakterler Markdown'ı bozabiliyor)
     payload = {"chat_id": chat_id, "text": text, "parse_mode": "Markdown"}
@@ -168,32 +172,30 @@ def analyze_single_stock(chat_id, symbol):
         from tvDatafeed import TvDatafeed
         tv = TvDatafeed()
         tf = TIMEFRAME_OPTIONS["Gunluk"]
-        
         tv_exchange = "BINANCE" if market == "CRYPTO" else market
-        
-        base_raw = fetch_hist(tv, symbol, tv_exchange, interval_obj(tf["base"]), tf["bars"], retries=3)
-        conf_raw = fetch_hist(tv, symbol, tv_exchange, interval_obj(tf["confirm"]), tf["confirm_bars"], retries=3)
-        
-        if base_raw is None or base_raw.empty:
-            send_msg(chat_id, f"❌ *{symbol}* için veri bulunamadı. Sembol adını kontrol edin.")
+        index_healthy = check_index_health(tv, market, "Gunluk")
+        global_index_df = get_cached_index_history(market, "Gunluk", bars=tf["bars"])
+
+        prep = prepare_symbol_dataframes(
+            tv, symbol, tv_exchange, tf,
+            global_index_df=global_index_df,
+            delay_ms=0,
+            worker_id=0,
+        )
+        if not prep.get("ok"):
+            send_msg(chat_id, f"❌ *{symbol}*: {prep.get('error', 'veri yok')}")
             return
-        
-        base = add_indicators(base_raw)
-        conf = add_indicators(conf_raw)
-        
-        vb = base.dropna(subset=["close", "ema20", "ema50", "sma20", "rsi", "macd_hist", "atr", "atr_pct", "adx"])
-        vc = conf.dropna(subset=["close", "ema20", "ema50", "macd_hist"])
-        
-        if vb.empty or vc.empty:
-            send_msg(chat_id, f"❌ *{symbol}* için yeterli veri bulunamadı.")
-            return
-        
-        last = vb.iloc[-1]
-        prev = vb.iloc[-2] if len(vb) > 1 else last
-        conf_last = vc.iloc[-1]
-        
-        # Skorlama
-        s = score_symbol(last, prev, conf_last, market)
+
+        vb = prep["vb"]
+        vc = prep["vc"]
+        last = prep["last"]
+        prev = prep["prev"]
+        conf_last = prep["conf_last"]
+        from scan_pipeline import attach_divergence_to_last
+
+        attach_divergence_to_last(last, prep["base_raw"])
+
+        s = score_symbol(last, prev, conf_last, market, index_healthy)
         
         # Hedef Fiyatlar
         targets = calculate_price_targets(vb)
@@ -223,7 +225,7 @@ def analyze_single_stock(chat_id, symbol):
         msg += f"   Kalite: *{s['Kalite']}* / 100\n"
         msg += f"   Trend: {s['Trend Skor']} | Momentum: {s['Momentum Skor']}\n"
         msg += f"   Dip: {s['Dip Skor']} | Breakout: {s['Breakout Skor']}\n"
-        msg += f"   Smart Money: {s['Smart Money Skor']} ({s['Kurumsal Giriş']})\n"
+        msg += f"   Smart Money: {s.get('Smart Money Skor', '-')}\n"
         msg += f"   Risk: {s['Dusus Riski']} | Güven: {s['Guven']}\n\n"
         
         # Teknik Göstergeler
@@ -246,8 +248,8 @@ def analyze_single_stock(chat_id, symbol):
         if vol_spike >= 2.5: msg += " 💥 PATLAMA"
         elif vol_spike >= 1.5: msg += " 📈 Artış"
         msg += "\n"
-        msg += f"   UT Bot: {s['UT Bot']}\n"
-        msg += f"   SMA200: {s['Kurumsal SMA200']}\n\n"
+        msg += f"   UT Bot (güçlü): {s.get('UT_Bot_Al', False)}\n"
+        msg += f"   SMA200: {round(float(_safe_get(last, 'sma200', 0)), 2)}\n\n"
         
         # Özel Durumlar
         ozel = s.get('Özel Durum', '-')
@@ -316,51 +318,6 @@ TALİMAT:
         send_msg(chat_id, f"❌ *{symbol}* analiz hatası: {str(e)[:200]}")
 
 
-def format_telegram_message(market, df_res):
-    if df_res.empty: return f"❌ {market} piyasasında fırsat bulunamadı."
-    buy_signals = df_res[df_res["Sinyal"] == "AL"]
-    if buy_signals.empty: return f"❌ {market} piyasasında onaylı işlem setup'ı oluşmadı."
-    
-    top_buys = buy_signals.sort_values(by="Kalite", ascending=False).head(5)
-    msg = f"🛰️ *{market} QUANT DECISION ENGINE* ({datetime.now().strftime('%H:%M')})\n\n"
-    
-    for idx, row in top_buys.iterrows():
-        engine = row.get('Engine', 'SAFE')
-        decision = row.get('Decision', 'NO TRADE')
-        
-        # Engine Label
-        if engine == "OPPORTUNITY": 
-            engine_str = "⚡ OPPORTUNITY ENGINE DETECTED"
-        else:
-            engine_str = "🛡️ SAFE ENGINE DETECTED"
-            
-        msg += f"{engine_str} | *{row['Hisse']}*\n"
-        msg += f"━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-        msg += f"🎯 *Decision:* {decision}\n"
-        msg += f"📊 *Setup Puanı:* {row.get('Skor', 0)}/100 | *Trade Puanı:* {row.get('Kalite', 0)}/100\n"
-        msg += f"🔥 *Setup Stratejisi:* {row.get('Aksiyon', '-')}\n\n"
-        
-        # Ek Metrikler
-        msg += f"📈 *Gerekçe/Metrikler:*\n"
-        vol_s = row.get('Hacim Spike', 0.0)
-        msg += f"   ➤ Hacim Gücü: x{vol_s} {'🔥 Patlama' if vol_s >= 2 else ''}\n"
-        msg += f"   ➤ Ozel Durumlar: {row.get('Özel Durum', '-')}\n"
-        msg += f"   ➤ Likidite Eşiği: {row.get('Likidite', 'Geçti')}\n\n"
-        
-        # Trade Decision (Fiyatlar ve Risk) 
-        msg += f"💼 *TRADE PLANI (R/R: 1:{row.get('R/R', 0)})*\n"
-        msg += f"   ➤ Giriş: {row.get('Fiyat', 0)}\n"
-        msg += f"   ➤ Stop Loss: {row.get('Stop Loss', 0)} (%{row.get('Stop %', 0)})\n"
-        
-        tp1, tp2, tp3 = row.get('Hedef 1', 0), row.get('Hedef 2', 0), row.get('Hedef 3', 0)
-        if tp1 > 0:
-            msg += f"   ➤ TP 1 (%50 Çıkış): {tp1} (+%{row.get('Hedef 1 %', 0)})\n"
-            msg += f"   ➤ TP 2: {tp2} (+%{row.get('Hedef 2 %', 0)})\n"
-            msg += f"   ➤ TP 3 (Runner): {tp3} (+%{row.get('Hedef 3 %', 0)})\n"
-            
-        msg += "\n"
-        
-    return msg
 
 
 def perform_scan(market):
@@ -377,7 +334,7 @@ def perform_scan(market):
         df.to_csv(full_csv_path, index=False, encoding="utf-8-sig")
         print(f"✅ {market} Tüm Liste Kaydedildi: {full_csv_path}")
 
-    msg = format_telegram_message(market, df)
+    msg = format_telegram_message(market, df, status="OPEN")
     
     data = {}
     if os.path.exists(DATA_FILE):

@@ -1,8 +1,13 @@
 """
-physics_engine.py
+Physics Features Extractor:
+- Kalman Filter: Trend momentum (geçmiş 20 bar'dan, sinyal zamanında hesapla)
+- Fourier: Periodicity (200+ bar histogram, sinyal TARİHİNDE)
+- Elastisite: Price elasticity (reversion potansiyeli)
+- Momentum: ROC + Velocity
+
+KRITIK: TÜM HESAPLAMALAR SİNYAL TARİHİNDEN ÖNCEKİ VERİLERDEN!
 
 Fizik Tabanlı Makine Öğrenimi — Piyasayı bir enerji sistemi gibi modeller.
-
 1. Kalman Filtresi             — Gürültü temizleyici (Fake hareket eleme)
 2. Fourier Gürültü Filtresi   — Yalnızca anlamlı frekansları tutar
 3. Fiyat Elastisitesi         — "Geri çekilme kuvveti" (Mean Reversion fiziği)
@@ -265,6 +270,37 @@ class MomentumConservation:
             "sign_changes":     sign_changes,
         }
 
+# =========================================================================== #
+#  6. HURST EXPONENT — Market Verimliliği ve Fraktal Boyut
+# =========================================================================== #
+
+class HurstExponent:
+    """
+    Hurst Exponent (H):
+      H < 0.5: Mean Reverting (Anti-persistent) - Geri dönme eğilimi
+      H = 0.5: Random Walk (Verimli piyasa)
+      H > 0.5: Trending (Persistent) - Trende devam etme eğilimi
+
+    Bu metrik, ML modelinin "bu piyasa trende devam mı edecek yoksa dönecek mi?"
+    konusunda çok güçlü bir ayırt edici özelliktir.
+    """
+    def __init__(self, window: int = 100):
+        self.window = window
+
+    def calculate(self, prices: np.ndarray) -> float:
+        if len(prices) < 50: return 0.5
+        
+        # Rescaled Range (R/S) analizi basitleştirilmiş versiyonu
+        lags = range(2, 20)
+        tau = [np.std(np.subtract(prices[lag:], prices[:-lag])) for lag in lags]
+        
+        # Log-log regresyon eğimi
+        try:
+            reg = np.polyfit(np.log(lags), np.log(tau), 1)
+            return float(reg[0])
+        except:
+            return 0.5
+
 
 # =========================================================================== #
 #  5. PINN ÖZELLİK ÜRETİCİ — Tüm Fizik Metriklerini ML Özelliğine Dönüştür
@@ -281,6 +317,7 @@ class PhysicsFeatureExtractor:
         self.fourier  = FourierNoiseFilter(keep_ratio=0.20)
         self.elastic  = PriceElasticity(window=50)
         self.momentum = MomentumConservation(short_window=10, long_window=30)
+        self.hurst    = HurstExponent()
 
     def extract(self, df: pd.DataFrame) -> dict:
         """
@@ -345,6 +382,12 @@ class PhysicsFeatureExtractor:
             features["momentum_acceleration"]   = 0.0
             features["momentum_velocity_ratio"] = 1.0
             features["momentum_break"]          = 0
+
+        # --- Hurst ---
+        try:
+            features["hurst_exponent"] = round(self.hurst.calculate(arr[-200:]), 3)
+        except Exception:
+            features["hurst_exponent"] = 0.5
 
         return features
 
@@ -421,6 +464,15 @@ class PhysicsFeatureExtractor:
             tags.append(f"🌀 Dominant Döngü: {cyc} gün (Aylık periyot)")
         elif 50 <= cyc <= 70:
             tags.append(f"🌀 Dominant Döngü: {cyc} gün (Çeyrek periyot)")
+
+        # 5. Hurst (Verimlilik/Trend)
+        h = features.get("hurst_exponent", 0.5)
+        if h > 0.60:
+            score += 4.0
+            tags.append(f"🌊 TREND MARKETİ (Hurst={h:.2f} — Güçlü Devamlılık)")
+        elif h < 0.40:
+            score += 2.0
+            tags.append(f"🧱 MEAN REVERTING (Hurst={h:.2f} — Geri Dönüş Eğilimi)")
 
         return {
             "physics_score": round(float(max(-15.0, min(15.0, score))), 2),

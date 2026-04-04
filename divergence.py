@@ -6,6 +6,11 @@ class DivergenceEngine:
         self.min_divergence_count = 2
         self.source_mode = "high_low"   # "close" or "high_low"
         self.require_confirmation = True
+        # RSI boğa uyumsuzluk / reversal: LL fiyat + HL RSI + direnç kırılımı + hacim
+        self.rsi_reversal_vol_mult = 1.25
+        self.rsi_reversal_min_pivot_gap = 5
+        # Aynı barda 2+ gösterge şartı sağlanmasa bile yayımlanacak min. boğa uyumsuzluk skoru
+        self.min_bullish_standalone_score = 72.0
 
     def analyze(self, candles):
         """
@@ -34,29 +39,30 @@ class DivergenceEngine:
         indicators = self.compute_indicators(candles)
         pivots = self.find_pivots(candles)
 
+        # Boğa tarafı: gevşek çoklu gösterge yerine sıkı RSI reversal kuralı
+        rsi_reversal = self.detect_rsi_bullish_reversal(
+            candles, indicators["rsi"], pivots["pivot_lows"]
+        )
+
         all_signals = []
 
         for indicator_name in indicators:
             series = indicators[indicator_name]
 
-            bullish_signals = self.scan_low_side_divergences(
+            for s in self.scan_high_side_divergences(
                 candles=candles,
                 indicator_name=indicator_name,
                 indicator_values=series,
-                pivot_lows=pivots["pivot_lows"]
-            )
-
-            bearish_signals = self.scan_high_side_divergences(
-                candles=candles,
-                indicator_name=indicator_name,
-                indicator_values=series,
-                pivot_highs=pivots["pivot_highs"]
-            )
-
-            for s in bullish_signals:
+                pivot_highs=pivots["pivot_highs"],
+            ):
                 all_signals.append(s)
 
-            for s in bearish_signals:
+            for s in self.scan_low_side_divergences(
+                candles=candles,
+                indicator_name=indicator_name,
+                indicator_values=series,
+                pivot_lows=pivots["pivot_lows"],
+            ):
                 all_signals.append(s)
 
         grouped = {}
@@ -67,10 +73,33 @@ class DivergenceEngine:
             grouped[idx].append(signal)
 
         filtered_signals = []
+        seen = set()
         for idx in grouped:
             if len(grouped[idx]) >= self.min_divergence_count:
                 for s in grouped[idx]:
                     filtered_signals.append(s)
+                    seen.add((s["current_index"], s["indicator"], s["divergence_type"]))
+
+        # Dip tarafı: tek gösterge (ör. RSI veya MACD) ile oluşan güçlü boğa uyumsuzluğu
+        bullish_standalone_types = frozenset({"positive_regular", "positive_hidden"})
+        for s in all_signals:
+            if s["divergence_type"] not in bullish_standalone_types:
+                continue
+            key = (s["current_index"], s["indicator"], s["divergence_type"])
+            if key in seen:
+                continue
+            if float(s.get("score", 0.0)) >= self.min_bullish_standalone_score:
+                filtered_signals.append(s)
+                seen.add(key)
+
+        if rsi_reversal:
+            key = (
+                rsi_reversal["current_index"],
+                rsi_reversal["indicator"],
+                rsi_reversal["divergence_type"],
+            )
+            if key not in seen:
+                filtered_signals.append(rsi_reversal)
 
         summary = self.build_summary(filtered_signals)
 
@@ -167,7 +196,110 @@ class DivergenceEngine:
             "pivot_lows": pivot_lows
         }
 
+    def _sma_volume(self, candles, period, end_index):
+        if end_index < period - 1:
+            return None
+        s = 0.0
+        for j in range(end_index - period + 1, end_index + 1):
+            s += float(candles[j].get("volume") or 0)
+        return s / period
+
+    def detect_rsi_bullish_reversal(self, candles, rsi_values, pivot_lows):
+        """
+        Klasik RSI boğa reversal (AL):
+        - Fiyat: ikinci dip bir önceki dipten daha düşük (lower low)
+        - RSI: ikinci dipte RSI daha yüksek (higher low)
+        - Kısa vadeli direnç: iki dip arasındaki tepe (max high) üzerinde kapanış
+        - Hacim: onay mumunda ortalama üzeri (spike)
+        """
+        if len(pivot_lows) < 2 or len(candles) < 60:
+            return None
+
+        scan_index = len(candles) - 2 if self.require_confirmation else len(candles) - 1
+        if scan_index <= 0:
+            return None
+
+        lows = [float(c["low"]) for c in candles]
+        recent = pivot_lows[-self.max_pivots_to_check :]
+
+        for p2_idx in range(len(recent) - 1, 0, -1):
+            p2 = recent[p2_idx]
+            i2 = p2["index"]
+            for p1_idx in range(p2_idx - 1, -1, -1):
+                p1 = recent[p1_idx]
+                i1 = p1["index"]
+                if i2 <= i1:
+                    continue
+                if i2 - i1 < self.rsi_reversal_min_pivot_gap:
+                    continue
+
+                lp1 = lows[i1]
+                lp2 = lows[i2]
+                if lp2 >= lp1:
+                    continue
+
+                r1 = rsi_values[i1]
+                r2 = rsi_values[i2]
+                if r1 is None or r2 is None:
+                    continue
+                if r2 <= r1:
+                    continue
+
+                highs_between = [float(candles[j]["high"]) for j in range(i1 + 1, i2)]
+                if not highs_between:
+                    continue
+                resistance = max(highs_between)
+
+                close_now = float(candles[scan_index]["close"])
+                if close_now <= resistance:
+                    continue
+
+                vol_sma = self._sma_volume(candles, 20, scan_index)
+                if vol_sma is None or vol_sma <= 0:
+                    continue
+                vol_now = float(candles[scan_index].get("volume") or 0)
+                if vol_now < vol_sma * self.rsi_reversal_vol_mult:
+                    continue
+
+                # Kırılım ikinci dipten sonra gelmeli (aynı mumda genelde direnç altıdır)
+                if scan_index <= i2:
+                    continue
+
+                return {
+                    "indicator": "rsi",
+                    "divergence_type": "rsi_bullish_reversal",
+                    "current_index": scan_index,
+                    "pivot_index": i1,
+                    "bars_distance": scan_index - i1,
+                    "price_current": close_now,
+                    "price_pivot": lp2,
+                    "indicator_current": r2,
+                    "indicator_pivot": r1,
+                    "score": self.score_divergence(
+                        "rsi_bullish_reversal",
+                        scan_index - i1,
+                        close_now,
+                        lp2,
+                        r2,
+                        r1,
+                        resistance=resistance,
+                    ),
+                    "resistance": resistance,
+                    "pivot_low_1": lp1,
+                    "pivot_low_2": lp2,
+                    "rsi_pivot_1": r1,
+                    "rsi_pivot_2": r2,
+                }
+
+        return None
+
     def scan_low_side_divergences(self, candles, indicator_name, indicator_values, pivot_lows):
+        """
+        Klasik boğa (pozitif regular) uyumsuzluk: önceki dipten sonra fiyat daha aşağıda
+        bir dip yaparken (LL) gösterge daha yukarıda bir dip yapar (HL). Sezgisel ifade:
+        «RSI/MACD güçlenirken fiyat daha zayıf dip vurur» — burada karşılaştırma iki pivot
+        dip arasındadır; her mumda ters yön aranmaz. MACD için hem macd çizgisi hem macd_hist taranır.
+        """
         results = []
         current_index = len(candles) - 1
 
@@ -415,7 +547,8 @@ class DivergenceEngine:
         price_current,
         price_pivot,
         indicator_current,
-        indicator_pivot
+        indicator_pivot,
+        resistance=None,
     ):
         base = 70
 
@@ -427,6 +560,8 @@ class DivergenceEngine:
             base = 75
         elif divergence_type == "negative_hidden":
             base = 75
+        elif divergence_type == "rsi_bullish_reversal":
+            base = 90
 
         price_strength = self.absolute_percent_change(price_pivot, price_current)
         indicator_strength = self.absolute_percent_change(indicator_pivot, indicator_current)
@@ -435,6 +570,11 @@ class DivergenceEngine:
         score += min(10, bars_distance / 8)
         score += min(10, price_strength / 2)
         score += min(10, indicator_strength / 2)
+
+        if divergence_type == "rsi_bullish_reversal" and resistance and resistance > 0:
+            # Kırılım mesafesi (direnç üstü ne kadar?)
+            brk = ((price_current - resistance) / resistance) * 100
+            score += min(5, max(0, brk))
 
         if score > 100:
             score = 100
@@ -451,7 +591,7 @@ class DivergenceEngine:
             dtype = s["divergence_type"]
             ind = s["indicator"]
 
-            if dtype in ["positive_regular", "positive_hidden"]:
+            if dtype in ["positive_regular", "positive_hidden", "rsi_bullish_reversal"]:
                 bullish += 1
             else:
                 bearish += 1
@@ -464,8 +604,11 @@ class DivergenceEngine:
                 by_type[dtype] = 0
             by_type[dtype] += 1
 
+        has_rsi_rev = any(s.get("divergence_type") == "rsi_bullish_reversal" for s in signals)
         bias = "neutral"
-        if bullish > bearish:
+        if has_rsi_rev:
+            bias = "bullish"
+        elif bullish > bearish:
             bias = "bullish"
         elif bearish > bullish:
             bias = "bearish"
@@ -486,15 +629,18 @@ class DivergenceEngine:
 
     def build_ai_hint(self, bias, top_signals):
         if len(top_signals) == 0:
-            return "No strong divergence cluster detected."
+            return "Güçlü uyumsuzluk yok."
 
         strongest = top_signals[0]
+        if strongest.get("divergence_type") == "rsi_bullish_reversal":
+            return (
+                "RSI boğa reversal: daha düşük dip + RSI’da daha yüksek dip, "
+                "iki dip arası direnç kırıldı, hacim onayı var."
+            )
         return (
-            "Bias is " + bias +
-            ". Strongest signal: " + strongest["divergence_type"] +
-            " on " + strongest["indicator"] +
-            " with score " + str(strongest["score"]) +
-            ". Use divergence as context, not standalone trade trigger."
+            "Bias: " + bias +
+            ". En güçlü: " + strongest["divergence_type"] +
+            " (" + strongest["indicator"] + "), skor " + str(strongest["score"]) + "."
         )
 
     def get_low_series(self, candles):

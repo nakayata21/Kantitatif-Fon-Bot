@@ -12,6 +12,15 @@ import pickle
 import os
 import numpy as np
 from typing import Dict
+try:
+    from trainer_service import ShapExplainer
+except:
+    pass
+
+if 'ShapExplainer' not in globals():
+    class ShapExplainer: 
+        """Mock class when import fails to prevent Pickle errors."""
+        pass
 
 MODEL_PATH = "ai_model.pkl"
 
@@ -56,6 +65,9 @@ FEATURE_TO_COMPONENT = {
     "isy_score":      "w_trend",
     # ADX → Momentum
     "adx":            "w_momentum",
+    "feat_rsi_mom":   "w_momentum",
+    "feat_vol_atr":   "w_breakout",
+    "feat_trend_strength": "w_trend",
 }
 
 _cached_weights: Dict = None   # İçi dolu olduğunda tekrar hesaplanmaz
@@ -99,7 +111,13 @@ def load_adaptive_weights(force_reload: bool = False) -> Dict[str, float]:
 
         # Model hem eski (pipeline doğrudan) hem yeni (sözlük) format desteği
         if isinstance(exported, dict):
+            # Yeni formatta ana model "student" veya "experts" içinde olabilir
             pipeline  = exported.get("pipeline")
+            if not pipeline:
+                pipeline = exported.get("student")
+                if not pipeline and "experts" in exported and exported["experts"]:
+                    # Herhangi bir uzman modeli al
+                    pipeline = list(exported["experts"].values())[0]
             features  = exported.get("features", [])
             meta      = exported.get("metadata", {})
         else:
@@ -107,7 +125,11 @@ def load_adaptive_weights(force_reload: bool = False) -> Dict[str, float]:
             features  = []
             meta      = {}
 
-        importances = pipeline.named_steps["model"].feature_importances_
+        if hasattr(pipeline, 'named_steps'):
+            importances = pipeline.named_steps["model"].feature_importances_
+        else:
+            importances = pipeline.feature_importances_
+            
         importance_map = dict(zip(features, importances))
 
         accuracy = meta.get("best_accuracy", meta.get("cv_accuracy", 0))

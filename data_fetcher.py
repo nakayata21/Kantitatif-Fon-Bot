@@ -88,9 +88,10 @@ def fetch_isy_fundamentals(ticker: str) -> Dict[str, object]:
             ratios = isy.fetch_stock_data(symbols=clean_sym, start_date="01-01-2024")
             if not ratios.empty:
                 last_r = ratios.iloc[-1]
-                # v5 rasyoları farklı isimlerle dönüyor olabilir, test sonucuna göre eşle
-                result["pe_ratio"] = _safe_get(last_r, "HGDG_KAPANIS") # Örnek fiyat
-                # Not: Rasyolar genelde fetch_index_data veya tablo bazlı çekilir
+                # v5 rasyoları farklı isimlerle dönüyor olabilir. 
+                # HGDG_KAPANIS aslında FİYAT verisidir, F/K değildir! Bu yüzden kaldırıldı.
+                result["pe_ratio"] = None 
+                result["pb_ratio"] = None
         except:
             pass
 
@@ -98,6 +99,22 @@ def fetch_isy_fundamentals(ticker: str) -> Dict[str, object]:
         # Bu kısım fetch_yf_data içinde zaten bir ölçüde var ama buraya entegre edelim
         financials = isy.fetch_financials(symbols=clean_sym)
         if not financials.empty:
+            # FINANCIAL_ITEM_NAME_TR ikinic kolonda (index 1)
+            if isinstance(financials.index, pd.RangeIndex) and len(financials.columns) > 1:
+                item_col = financials.columns[1]
+                # Indeksi temizle (Bosluklari at)
+                financials[item_col] = financials[item_col].astype(str).str.strip()
+                financials = financials.set_index(item_col)
+            
+            # --- TABLOYU TEMIZLE (Sadece Tarih Kolonlari Kalsin) ---
+            # Sadece tarih/deger iceren (icinde rakam olan) kolonlari tut
+            data_cols = [c for c in financials.columns if any(char.isdigit() for char in str(c))]
+            financials = financials[data_cols]
+            
+            # Tum verileri sayisala cevir
+            for c in data_cols:
+                financials[c] = pd.to_numeric(financials[c].astype(str).str.replace('.', '').str.replace(',', '.'), errors='coerce').fillna(0)
+
             # Piotroski F-Score Hesapla (scoring.py içinde tanımlı)
             from scoring import calculate_piotroski
             f_score, _ = calculate_piotroski(financials)
@@ -136,9 +153,59 @@ def fetch_isy_fundamentals(ticker: str) -> Dict[str, object]:
                 except:
                     pass
             
-    except Exception as e:
-        result["error"] = str(e)
-    
+    except:
+        pass
+            
+    # --- FK ve PD/DD HESAPLAMA (AKILLI KONTROL) ---
+    try:
+        import yfinance as yf
+        # Temel verileri İş Yatırım'dan çekmiştik (financials), rasyoları Yahoo'dan doğrula
+        tk = yf.Ticker(f"{ticker}.IS")
+        info = tk.info
+        mcap = info.get("marketCap")
+        
+        # 1. Önce Bilançodan TTM (Yıllıklandırılmış) Kar ile Manuel Hesapla
+        try:
+            if not financials.empty:
+                df_fin = financials.copy()
+                # 1. DINAMIK INDEKSEME: Ilk kolonu baslik yap (Sayısal index varsa)
+                if isinstance(df_fin.index, pd.RangeIndex):
+                    first_col = df_fin.columns[0]
+                    df_fin = df_fin.set_index(first_col)
+                
+                # 2. SATIR BULMA: 'DÖNEM KARI (ZARARI)' satirini contains ile ara
+                target_row = None
+                for idx_val in df_fin.index:
+                    if "DÖNEM KARI (ZARARI)" in str(idx_val):
+                        target_row = idx_val
+                        break
+                
+                if target_row is not None:
+                    kar_series = df_fin.loc[target_row]
+                    all_nums = []
+                    for v in kar_series:
+                        f_v = to_float(v)
+                        if f_v != 0: all_nums.append(abs(f_v))
+                    
+                    if len(all_nums) >= 1:
+                        ttm_kar = sum(sorted(all_nums, reverse=True)[:4])
+                        if ttm_kar > 0 and mcap:
+                            raw_pe = mcap / ttm_kar
+                            if raw_pe > 500: result["pe_ratio"] = mcap / (ttm_kar * 1000)
+                            else: result["pe_ratio"] = raw_pe
+        except: pass
+
+        # 2. Yahoo Finance Fallback (SADECE MAKULSE)
+        yf_pe = info.get("trailingPE")
+        if (result["pe_ratio"] is None or result["pe_ratio"] > 100) and yf_pe:
+            if 0.5 < yf_pe < 80: # 80 uzeri BIST icin %99 hatadir
+                result["pe_ratio"] = yf_pe
+            # Eger YF 80+ ise; kullanma, yanlis yonlendirmesin.
+
+        result["pb_ratio"] = info.get("priceToBook")
+        result["market_cap"] = mcap
+    except: pass
+
     # --- AKD / TAKAS PROXY ---
     result["takas_metrics"] = {
         "hisse_adi": clean_sym,
@@ -206,14 +273,15 @@ def _fetch_quick_fundamentals_real(ticker: str, market: str = "NASDAQ") -> Dict[
     db_data = get_fundamental_data(ticker)
     if db_data:
         # Eğer veri son 30 gün içindeyse (veya taze ise) direkt dön
-        # (GitHub Action haftalık olarak güncellenecek olsa da DB'yi taze kabul ediyoruz)
         return db_data
 
     # 2. VERİTABANINDA YOKSA API'DEN ÇEK
     if market == "BIST":
+        # İs Yatırım (isyatirimhisse) üzerinden genel finansallar ve rasyoları çek
+        # Artık fetch_isy_fundamentals kendi içinde akıllı kontrol yapıyor
         res = fetch_isy_fundamentals(ticker)
+        
         if not res.get("error"):
-            # Veritabanına kaydet
             save_fundamental_data(ticker, market, res)
         return res
         
@@ -563,10 +631,10 @@ def get_ai_model(market: str, tf_name: str, _tv=None) -> tuple:
             
             features = exported.get('features', [])
             
-            # Rejim Tespiti (MoE - Uzman Seçimi)
+            # Rejim Tespiti (Expert Selection)
             current_regime = 'sideways'
             try:
-                # Mevcut endeks verisini çek (Son 5 gün)
+                # Mevcut endeks verisini çek (Son 100 gün - Hurst ve Momentum için)
                 from tvDatafeed import TvDatafeed
                 if _tv is None: _tv = TvDatafeed()
                 tf = TIMEFRAME_OPTIONS[tf_name]
@@ -574,12 +642,26 @@ def get_ai_model(market: str, tf_name: str, _tv=None) -> tuple:
                 idx_exch = "NASDAQ" if market == "NASDAQ" else ("BINANCE" if market == "CRYPTO" else "BIST")
                 
                 try:
-                    idx_raw = fetch_hist(_tv, idx_sym, idx_exch, interval_obj(tf["base"]), 10, retries=2)
-                    if idx_raw is not None and len(idx_raw) >= 6:
-                        c = idx_raw['close']
-                        ret_5d = ((c.iloc[-1] - c.iloc[-6]) / c.iloc[-6]) * 100
-                        if ret_5d > 1.5: current_regime = 'bull'
-                        elif ret_5d < -1.5: current_regime = 'bear'
+                    idx_raw = fetch_hist(_tv, idx_sym, idx_exch, interval_obj(tf["base"]), 100, retries=2)
+                    if idx_raw is not None and len(idx_raw) >= 50:
+                        c = idx_raw['close'].values
+                        ret_5d = ((c[-1] - c[-6]) / c[-6]) * 100
+                        
+                        # Hurst Hesapla (Basit)
+                        lags = range(2, 20)
+                        tau = [np.std(np.subtract(c[lag:], c[:-lag])) for lag in lags]
+                        reg = np.polyfit(np.log(lags), np.log(tau), 1)
+                        hurst = float(reg[0])
+                        
+                        if hurst < 0.45:
+                            current_regime = 'mean_reversion'
+                        elif ret_5d > 1.0 and hurst > 0.55:
+                            current_regime = 'bull_trend'
+                        elif ret_5d < -1.0 and hurst > 0.55:
+                            current_regime = 'bear_trend'
+                        else:
+                            current_regime = 'sideways'
+                            
                 except Exception as e:
                     print(f"   ⚠️ Rejim tespiti veri çekim hatası: {e}")
                     pass
@@ -588,9 +670,14 @@ def get_ai_model(market: str, tf_name: str, _tv=None) -> tuple:
             # Uzmanlar içinden rejime uygun olanı seç
             experts = exported.get('experts', {})
             if experts:
-                selected_model = experts.get(current_regime, list(experts.values())[0])
+                # Eşleşen rejimi bul, yoksa en yakını veya 'sideways'i seç
+                selected_model = experts.get(current_regime)
+                if not selected_model:
+                    # 'bull_trend' yoksa 'bull' ara (Geriye uyumluluk)
+                    fallback_map = {'bull_trend': 'bull', 'bear_trend': 'bear', 'mean_reversion': 'sideways'}
+                    selected_model = experts.get(fallback_map.get(current_regime, 'sideways'), list(experts.values())[0])
+                
                 print(f"   ✅ [Expert Selection] Rejim: {current_regime.upper()} | Model Yüklendi.")
-                # Olasılık skorlarını alabilmek için predict_proba desteğini kontrol et
                 return selected_model, features
             elif 'pipeline' in exported:
                 return exported['pipeline'], features

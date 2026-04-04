@@ -1,0 +1,13 @@
+# BIST Terminal tarzı koyu tema (ui_components ile uyumlu)
+[theme]
+base = "dark"
+primaryColor = "#00d2ff"
+backgroundColor = "#020408"
+secondaryBackgroundColor = "#0a0c12"
+textColor = "#e2e4e9"
+
+[browser]
+gatherUsageStats = false
+
+[server]
+headless = true

@@ -16,6 +16,10 @@ def format_telegram_message(market, df_res, status):
     buy_signals = df_res[df_res["Sinyal"] == "AL"]
     status_text = "🟢 Piyasa Açık (Canlı)" if status == "OPEN" else "🕒 Piyasa Kapalı/Açılmak Üzere"
     
+    # Market Rejimi Etiketi (YENİ)
+    regime = str(df_res["market_regime"].iloc[0]) if "market_regime" in df_res.columns else "MIXED"
+    regime_emoji = "🚀 TRENDING" if regime == "TREND" else ("🗜️ ACCUMULATION" if regime == "ACCUMULATION" else ("🐻 BEARISH" if regime == "BEAR" else "🌀 MIXED"))
+
     if buy_signals.empty: 
         # AL sinyali yoksa kaliteye göre en iyi 5 beklemedeki hisseyi göster
         if "Kalite" in df_res.columns:
@@ -24,7 +28,8 @@ def format_telegram_message(market, df_res, status):
             top_watchlist = df_res.head(5)
             
         msg = f"🛰️ *{market} SCANNER* ({datetime.now(TR_TZ).strftime('%H:%M')})\n"
-        msg += f"⏱ Durum: {status_text}\n\n"
+        msg += f"⏱ Durum: {status_text}\n"
+        msg += f"🌐 Rejim: *{regime_emoji}*\n\n"
         msg += f"⚠️ *Onaylı AL sinyali yok, ancak en yüksek kaliteli adaylar:*\n\n"
         
         for _, row in top_watchlist.iterrows():
@@ -39,7 +44,8 @@ def format_telegram_message(market, df_res, status):
     top_buys = buy_signals.sort_values(by="Kalite", ascending=False).head(8) if "Kalite" in buy_signals.columns else buy_signals.head(8)
     
     msg = f"🛰️ *{market} QUANT DECISION ENGINE* ({datetime.now(TR_TZ).strftime('%H:%M')})\n"
-    msg += f"⏱ Durum: {status_text}\n\n"
+    msg += f"⏱ Durum: {status_text}\n"
+    msg += f"🌐 Rejim: *{regime_emoji}*\n\n"
     
     # ULTIMATE FUSION (UT Bot + Uyumsuzluk)
     if "UT_Plus_Div" in df_res.columns:
@@ -69,56 +75,18 @@ def format_telegram_message(market, df_res, status):
         
         for row in items:
             hisse = row.get("Hisse") or row.get("symbol") or "Bilinmeyen"
-            engine = row.get('Engine', 'SAFE')
-            decision = row.get('Decision', 'NO TRADE')
-            
-            # Engine Label
-            engine_str = "⚡ OPPORTUNITY" if engine == "OPPORTUNITY" else "🛡️ SAFE"
+            derece = row.get("Elite Derece", "STANDART")
                 
-            msg += f"{engine_str} | *{hisse}*\n"
-            msg += f"🎯 *Decision:* {decision} ({row.get('Elite Derece', 'STANDART')})\n"
-            msg += f"📊 *Setup:* {row.get('Skor', 0)}/100 | *Trade Puanı:* {row.get('Kalite', 0)}/100\n"
+            msg += f"🔸 *${hisse}* | Puan: {row.get('Kalite', 0)} | {derece}\n"
             msg += f"🚀 *Plan:* {row.get('Aksiyon', '-')}\n"
             
             # Fiyat ve Risk (Kısa format)
             tp_pct = row.get('Hedef 1 %', 0)
             msg += f"💼 Giriş: {row.get('Fiyat', 0)} | SL: {row.get('Stop Loss', 0)} (%{row.get('Stop %', 0)})\n"
             if tp_pct and float(tp_pct) > 0:
-                msg += f"💰 Hedef 1 (Kar Al): +%{tp_pct} ({row.get('Hedef 1', 0)})\n"
+                msg += f"💰 Hedef: {row.get('Hedef 1', 0)} (+%{tp_pct})\n"
             
-            msg += f"🔍 *Teknik:* Vol: x{row.get('Hacim Spike', 0)} | {row.get('Özel Durum', '-')}\n"
-            
-            sig_p = row.get("Sinyal Fiyatı", "-")
-            if sig_p != "-":
-                msg += f"💡 *Sinyal:* {sig_p} ({row.get('Sinyal Mesafesi', '-')} Mesafe | {row.get('Sinyal Zamanı', '-')})\n"
-            
-            # Temel Analiz Verileri (Eğer Varsa)
-            pe = row.get("pe_ratio")
-            pb = row.get("pb_ratio")
-            grade = row.get("isy_grade")
-            
-            fund_parts = []
-            try:
-                if pd.notna(pe) and pe is not None and str(pe) != "nan":
-                    val = float(str(pe).replace(",", "."))
-                    fund_parts.append(f"F/K: {round(val, 1)}")
-                if pd.notna(pb) and pb is not None and str(pb) != "nan":
-                    val = float(str(pb).replace(",", "."))
-                    fund_parts.append(f"PD/DD: {round(val, 1)}")
-            except: pass
-            
-            if grade and str(grade) != "nan" and grade != "-":
-                fund_parts.append(f"Not: {grade}")
-                
-            if fund_parts:
-                msg += f"🏢 *Temel:* {' | '.join(fund_parts)}\n"
-            
-            # Takas Bilgisi
-            takas_karar = row.get("Takas Karari", "-")
-            if takas_karar not in ("-", "VERİ BEKLENİYOR", None):
-                msg += f"📦 *Takas:* {takas_karar} (Puan: {row.get('Takas Puani', 0)})\n"
-            
-            msg += "\n"
+            msg += f"🔍 {row.get('Özel Durum', '-')}\n\n"
             
     # Güçlü UT Bot Sinyalleri (Sadece Tek Başına Olanlar)
     if "UT_Bot_Al" in df_res.columns:

@@ -13,6 +13,16 @@ sys.path.append("/Users/selmanaslan/Documents/New project")
 from indicators import add_indicators
 from scoring import score_symbol
 from signals_db import log_signal, init_db
+
+# Mock ShapExplainer to prevent pickle errors during scoring imports
+try:
+    from trainer_service import ShapExplainer
+except ImportError:
+    class ShapExplainer: pass
+import __main__
+if not hasattr(__main__, 'ShapExplainer'):
+    setattr(__main__, 'ShapExplainer', ShapExplainer)
+
 from constants import DEFAULT_BIST_HISSELER, TIMEFRAME_OPTIONS
 from data_fetcher import interval_obj
 import yfinance as yf
@@ -21,6 +31,7 @@ def get_historical_macro(years=1.5):
     """Geçmiş makro verileri (USDTRY, Altın, Endeks) indirir ve sözlük olarak döner."""
     macros = {"USDTRY": "USDTRY=X", "GOLD": "GC=F", "XU100": "XU100.IS"}
     macro_dfs = {}
+
     for name, ticker in macros.items():
         try:
             df = yf.download(ticker, period=f"{int(years*365)}d", interval="1d", progress=False)
