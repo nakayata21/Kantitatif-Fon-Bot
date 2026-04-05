@@ -1,11 +1,11 @@
 
 🔬 **AI KENDİNİ İYİLEŞTİRME RAPORU**
-📅 2026-04-02 18:22
+📅 2026-04-05 03:38
 
 ✅ **Model Performansı:**
-- Kazanan Mimari: XGBoost (Standard)
-- Doğruluk (Optuna CV): %59.3
-- Walk-Forward Acc: %59.3 | AUC: 0.601
+- Kazanan Mimari: RandomForest (Robust)
+- Doğruluk (Optuna CV): %58.0
+- Walk-Forward Acc: %58.0 | AUC: 0.570
 - Strateji: Steady
 - 🔄 ROLLBACK: Eski versiyona dönüldü!
 
@@ -21,8 +21,8 @@
 - Walk-Forward Pencereleri: 4 adet test edildi
 
 🎯 **Otonom Tarama Politikası:**
-- Seçilen Alt Limit (Elite): 88.5
-- Seçilen Alt Limit (Trade): 66.4
+- Seçilen Alt Limit (Elite): 77.8
+- Seçilen Alt Limit (Trade): 61.5
 - Tahmini İsabet Oranı: %35.0
 
 📜 **Tecrübe Bankası:** 1702 kayıt hafızaya işlendi.
