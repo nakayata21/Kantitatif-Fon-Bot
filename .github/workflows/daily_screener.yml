@@ -16,6 +16,8 @@ jobs:
       FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
       ACTIONS_ALLOW_USE_UNSECURE_NODE_VERSION: true
       ACTIONS_STEP_DEBUG: true
+      ENABLE_AUTO_TRAINING: ${{ vars.ENABLE_AUTO_TRAINING || 'true' }}
+      TRAINING_INTERVAL_DAYS: ${{ vars.TRAINING_INTERVAL_DAYS || '3' }}
     strategy:
       fail-fast: false
       matrix:
@@ -38,6 +40,19 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
+          # PyTorch ve ek bağımlılıklar
+          pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu
+          
+      - name: Model Cache'ini Geri Yükle
+        uses: actions/cache@v3
+        with:
+          path: |
+            *.pth
+            ai_model.pkl
+            last_training_date.txt
+          key: ${{ runner.os }}-model-${{ hashFiles('deep_learning_core.py', 'trainer_service.py') }}
+          restore-keys: |
+            ${{ runner.os }}-model-
           
       - name: Taramayı Başlat (Self-Healing ile)
         uses: nick-fields/retry@v3
@@ -59,6 +74,8 @@ jobs:
           
           # 1. Dosyaları Ekle ve Commit Et (Zaten bir şeyler varsa)
           git add signals_log.db || true
+          git add *.pth || true
+          git add last_training_date.txt || true
           git commit -m "Auto-log: Recorded signals for ${{ matrix.market }} [skip ci]" || echo "Değişiklik yok"
           
           # 2. Üstteki çakışmaları önlemek için Güçlü Stash Kontrolü
