@@ -54,7 +54,7 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-model-
           
-      - name: Taramayı Başlat (Self-Healing ile)
+      - name: Tarama ve Eğitim (Self-Healing ile)
         uses: nick-fields/retry@v3
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
@@ -62,11 +62,16 @@ jobs:
           TARGET_MARKET: ${{ matrix.market }}
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
         with:
-          timeout_minutes: 12
+          timeout_minutes: 20
           max_attempts: 2
-          command: python github_scan_action.py
+          command: |
+            # LFM Ultra Advanced Deep Learning Pipeline'ı çalıştır
+            echo "🚀 LFM Ultra Advanced Engine başlatılıyor..."
+            python scan_and_train_deep.py || \
+            (echo "⚠️ Yeni pipeline başarısız, eski sisteme geçiliyor..." && \
+             python scan_and_train.py --market ${{ matrix.market }} --train ${{ env.ENABLE_AUTO_TRAINING == 'true' && 'True' || 'False' }})
 
-      - name: Sinyalleri Kaydet ve Pushla
+      - name: Sinyalleri, Veriyi ve Modeli Kaydet ve Pushla
         if: always()
         run: |
           git config --global user.name "AI Signals Logger"
@@ -75,8 +80,12 @@ jobs:
           # 1. Dosyaları Ekle ve Commit Et (Zaten bir şeyler varsa)
           git add signals_log.db || true
           git add *.pth || true
+          git add ai_model_*.pkl || true
+          git add training_data_*.json || true
+          git add training_data_*.csv || true
+          git add training_data_all.json || true
           git add last_training_date.txt || true
-          git commit -m "Auto-log: Recorded signals for ${{ matrix.market }} [skip ci]" || echo "Değişiklik yok"
+          git commit -m "Auto-log: Signals + Training Data for ${{ matrix.market }} [skip ci]" || echo "Değişiklik yok"
           
           # 2. Üstteki çakışmaları önlemek için Güçlü Stash Kontrolü
           if ! git diff --quiet || ! git diff --cached --quiet; then
