@@ -1,2 +1,19 @@
+```
+# Cache and data files
 .cache/
+*.parquet
+*.pkl
+
+# Training data files
+training_data_*.csv
+training_data_*.json
+
+# Logs and temporary files
+*.log
+*.tmp
+
+# Environment files
 .env
+.env.local
+*.env.*
+```

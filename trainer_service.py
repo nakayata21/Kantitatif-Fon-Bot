@@ -61,6 +61,112 @@ SL_ATR_MULT = 1.2   # ATR'nin kaç katı Zarar?
 MAX_DAYS    = 10    # Maksimum bekleme günü
 # =====================================================================
 
+# ================================================================
+# 🧠 LFM ULTRA ADVANCED - ÇOKLU GÖREV VERİ HAZIRLAMA
+# ================================================================
+def prepare_training_data(market="BIST", lookback_days=365):
+    """
+    LFM Ultra Advanced Engine için çoklu görev eğitim verisi hazırlar.
+    
+    Returns:
+        X: Özellik matrisi (numpy array)
+        y_direction: Yön etiketleri (0=Düşüş, 1=Yükseliş)
+        y_volatility: Volatilite etiketleri (0,1,2)
+        y_volume: Hacim değişimi etiketleri (0,1,2)
+    """
+    from constants import DEFAULT_BIST_30, DEFAULT_NASDAQ_HISSELER
+    
+    print(f"📊 {market} piyasası için eğitim verisi hazırlanıyor...")
+    
+    # Sembol listesini seç
+    if market == "BIST":
+        symbols = DEFAULT_BIST_30
+    elif market == "NASDAQ":
+        symbols = DEFAULT_NASDAQ_HISSELER[:50]
+    else:
+        symbols = DEFAULT_BIST_30  # Fallback
+    
+    all_features = []
+    all_labels_dir = []
+    all_labels_vol = []
+    all_labels_volm = []
+    
+    for symbol in symbols:
+        ticker = f"{symbol}.IS" if market == "BIST" else symbol
+        
+        try:
+            # Veriyi indir
+            df = yf.download(ticker, period=f"{lookback_days}d", interval="1d", progress=False)
+            
+            if df.empty or len(df) < 30:
+                continue
+            
+            # Teknik indikatörler ekle
+            from indicators import add_indicators
+            df = add_indicators(df)
+            
+            # Özellikleri hesapla
+            feature_cols = [col for col in df.columns if col not in ['Open', 'High', 'Low', 'Close', 'Volume'] 
+                           and df[col].dtype in [np.float64, np.int64, float, int]]
+            
+            if len(feature_cols) < 5:
+                continue
+            
+            X_symbol = df[feature_cols].values
+            
+            # Çoklu görev etiketleri oluştur
+            # 1. Yön: Bugünkü kapanış > Dünkü kapanış
+            close_prices = df['Close'].values.flatten() if hasattr(df['Close'], 'values') else df['Close'].values
+            y_dir = (close_prices[1:] > close_prices[:-1]).astype(int)
+            
+            # 2. Volatilite: Günlük getiri mutlak değerinin büyüklüğü
+            returns = np.diff(close_prices) / close_prices[:-1]
+            vol_abs = np.abs(returns)
+            vol_bins = np.digitize(vol_abs, bins=np.percentile(vol_abs[~np.isnan(vol_abs)], [33, 66]))
+            y_vol = vol_bins
+            
+            # 3. Hacim değişimi
+            volumes = df['Volume'].values.flatten() if hasattr(df['Volume'], 'values') else df['Volume'].values
+            vol_change = np.diff(volumes) / volumes[:-1]
+            vol_change_bins = np.digitize(vol_change, bins=np.percentile(vol_change[~np.isnan(vol_change)], [33, 66]))
+            y_volm = vol_change_bins
+            
+            # Uzunlukları eşitle
+            min_len = min(len(X_symbol) - 1, len(y_dir), len(y_vol), len(y_volm))
+            
+            if min_len > 0:
+                all_features.append(X_symbol[:-1][-min_len:])
+                all_labels_dir.append(y_dir[-min_len:])
+                all_labels_vol.append(y_vol[-min_len:])
+                all_labels_volm.append(y_volm[-min_len:])
+                
+        except Exception as e:
+            print(f"⚠️ {symbol} işlenirken hata: {e}")
+            continue
+    
+    if not all_features:
+        raise ValueError("Hiçbir sembol için veri hazırlanamadı!")
+    
+    # Tüm verileri birleştir
+    X = np.vstack(all_features)
+    y_dir = np.concatenate(all_labels_dir)
+    y_vol = np.concatenate(all_labels_vol)
+    y_volm = np.concatenate(all_labels_volm)
+    
+    # NaN değerleri temizle
+    mask = ~np.isnan(X).any(axis=1) & ~np.isnan(y_dir) & ~np.isnan(y_vol) & ~np.isnan(y_volm)
+    X = X[mask]
+    y_dir = y_dir[mask].astype(int)
+    y_vol = y_vol[mask].astype(int)
+    y_volm = y_volm[mask].astype(int)
+    
+    print(f"✅ Toplam {len(X)} örnek hazırlandı. Özellik boyutu: {X.shape[1]}")
+    print(f"   Yön dağılımı: {np.bincount(y_dir)}")
+    print(f"   Volatilite dağılımı: {np.bincount(y_vol)}")
+    print(f"   Hacim dağılımı: {np.bincount(y_volm)}")
+    
+    return X, y_dir, y_vol, y_volm
+
 # --- OPTIMIZED LABELING ---
 _history_cache = {}
 _tv_instance = None

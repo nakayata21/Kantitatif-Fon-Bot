@@ -78,7 +78,7 @@ def compute_ut_bot(close: pd.Series, high: pd.Series, low: pd.Series, a: float =
     buy, sell, out_pos = _ut_bot_numpy(close_arr, loss_arr)
     return pd.Series(buy, index=close.index), pd.Series(sell, index=close.index), pd.Series(out_pos, index=close.index)
 
-def add_indicators(df: pd.DataFrame, index_df: pd.DataFrame = None, symbol: str = None) -> pd.DataFrame:
+def add_indicators(df: pd.DataFrame, index_df: pd.DataFrame = None, symbol: str = None, skip_nlp: bool = True) -> pd.DataFrame:
     out = normalize(df)
     
     out["ema20"] = ta.trend.EMAIndicator(close=out["close"], window=20, fillna=True).ema_indicator()
@@ -578,13 +578,19 @@ def add_indicators(df: pd.DataFrame, index_df: pd.DataFrame = None, symbol: str 
 
     # --- 10. TURKISH NLP SENTIMENT (BERT) FEATURE ---
     # Haber duygu analizini bir özellik olarak ekle
+    # Disk alanı kısıtlı ortamlarda atlanır
     out["feat_sentiment"] = 0.0 # Default
-    if symbol:
-        clean_sym = symbol.replace(".IS", "").split(":")[-1]
-        engine = get_sentiment_engine()
-        if engine:
-            score = engine.get_sentiment_score(clean_sym)
-            out["feat_sentiment"] = score
+    if not skip_nlp and symbol:
+        try:
+            clean_sym = symbol.replace(".IS", "").split(":")[-1]
+            engine = get_sentiment_engine()
+            if engine:
+                score = engine.get_sentiment_score(clean_sym)
+                if score is not None:
+                    out["feat_sentiment"] = score
+        except Exception as e:
+            # NLP hatası olursa sessizce 0 devam et
+            pass
 
     return out
 
