@@ -32,6 +32,10 @@ app = FastAPI(title="Gelişmiş Hisse Tarayıcı API")
 # HTML dosyanızın bulunduğu klasörü templateler için tanımlıyoruz
 templates = Jinja2Templates(directory="frontend")
 
+# Mobile API router'ı dahil et
+from mobile_api import router as mobile_router
+app.include_router(mobile_router)
+
 @app.get("/", response_class=HTMLResponse)
 async def read_root(request: Request):
     # index.html dosyasını direkt olarak kullanıcıya sunuyoruz
