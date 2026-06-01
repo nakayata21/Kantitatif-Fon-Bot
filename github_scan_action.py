@@ -36,6 +36,9 @@ if not CHAT_IDS:
 MARKET = os.environ.get("TARGET_MARKET", "BIST")
 OPENROUTER_API_KEY = os.environ.get("OPENROUTER_API_KEY")
 
+# Mobile API entegrasyonu için yeni import
+from mobile_api_sender import send_to_mobile_api, save_scan_results_json
+
 def get_market_status(market="BIST"):
     """Piyasa durumunu kontrol eder: OPEN, PRE_MARKET, CLOSED"""
     now_tr = datetime.now(TR_TZ)
@@ -238,8 +241,32 @@ if __name__ == "__main__":
                     message += f"\n\n🤖 *AI ANALİZİ:*\n{ai_msg}"
                 send_msg(message)
                 print(f"[{datetime.now(TR_TZ)}] ✅ Sinyal bildirimi Telegram'a gönderildi.")
+                
+                # MOBİL API'YE GÖNDER (YENİ)
+                try:
+                    mobile_result = send_to_mobile_api(df, MARKET, status, ai_msg)
+                    if mobile_result.get("success"):
+                        print(f"[{datetime.now(TR_TZ)}] ✅ Tarama sonuçları Mobil API'ye gönderildi.")
+                    else:
+                        print(f"[{datetime.now(TR_TZ)}] ⚠️ Mobil API gönderim hatası: {mobile_result.get('error')}")
+                except Exception as e:
+                    print(f"[{datetime.now(TR_TZ)}] ❌ Mobil API gönderim hatası: {str(e)}")
             else:
                 print(f"[{datetime.now(TR_TZ)}] ℹ️ Sinyal oluşmadığı veya AL sinyali bulunmadığı için Telegram bildirimi atlanıyor.")
+                
+                # Yine de mobil API'ye gönder (boş sonuç bile olsa)
+                try:
+                    if not df.empty:
+                        mobile_result = send_to_mobile_api(df, MARKET, status, None)
+                        if mobile_result.get("success"):
+                            print(f"[{datetime.now(TR_TZ)}] ✅ Tarama sonuçları Mobil API'ye gönderildi (AL sinyali yok).")
+                except Exception as e:
+                    print(f"[{datetime.now(TR_TZ)}] ⚠️ Mobil API gönderim hatası: {str(e)}")
+            
+            # JSON dosyasına kaydet (GitHub Artifact olarak kullanılabilir)
+            if not df.empty:
+                save_scan_results_json(df, MARKET, status, "mobile_scan_results.json")
+            
             print(f"[{datetime.now(TR_TZ)}] İşlem Tamamlandı.")
             os._exit(0)
         except Exception as e:
